@@ -1,0 +1,85 @@
+# HC-AI MCP Server - Tool Configuration
+# Set enabled: true/false to toggle each tool
+# Restart the server after making changes
+
+server:
+  name: "HC-AI MCP Server"
+  # Transport options: "stdio" (for Claude Desktop, Cursor) or "streamable-http" (network)
+  transport: "stdio"
+
+tools:
+  # ============================================================================
+  # AGENT TOOLS
+  # Query the HC-AI agent and manage agent sessions
+  # ============================================================================
+  agent_query:
+    enabled: true
+    description: "Query the HC-AI agent with a natural language question"
+  
+  agent_clear_session:
+    enabled: true
+    description: "Clear agent session history for a given session ID"
+  
+  agent_health:
+    enabled: true
+    description: "Check agent health status and configuration"
+
+  # ============================================================================
+  # RETRIEVAL TOOLS
+  # Rerank documents using cross-encoder models
+  # ============================================================================
+  rerank:
+    enabled: true
+    description: "Rerank documents by relevance to a query"
+  
+  rerank_with_context:
+    enabled: true
+    description: "Rerank documents with optional full FHIR bundle context"
+  
+  batch_rerank:
+    enabled: true
+    description: "Batch rerank multiple queries in parallel"
+
+  # ============================================================================
+  # SESSION TOOLS
+  # Manage conversation session state and history
+  # ============================================================================
+  session_append_turn:
+    enabled: true
+    description: "Append a conversation turn to session history"
+  
+  session_get:
+    enabled: true
+    description: "Get session state including recent turns and summary"
+  
+  session_update_summary:
+    enabled: true
+    description: "Update the session summary"
+  
+  session_clear:
+    enabled: true
+    description: "Clear all session data for a session ID"
+
+  # ============================================================================
+  # EMBEDDINGS TOOLS
+  # Ingest documents and manage the vector database
+  # ============================================================================
+  ingest:
+    enabled: true
+    description: "Ingest a clinical note for chunking and embedding"
+  
+  embeddings_health:
+    enabled: true
+    description: "Check embeddings service health and configuration"
+  
+  db_stats:
+    enabled: true
+    description: "Get database connection and queue statistics"
+  
+  db_queue:
+    enabled: true
+    description: "Get ingestion queue status"
+  
+  db_errors:
+    enabled: true
+    description: "Get error logs with optional filtering"
