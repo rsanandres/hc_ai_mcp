@@ -7,6 +7,10 @@ import hashlib
 from typing import Any, Dict, List, Optional
 
 from config import is_tool_enabled
+from logging_config import get_logger
+from tools.utils import error_response, get_timeout, validate_k, validate_metadata, validate_non_empty
+
+logger = get_logger("hc_ai.tools.retrieval")
 
 
 def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
@@ -38,18 +42,31 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from db import search_similar_chunks
             from reranker import get_reranker, get_cache, build_cache_key
-            
-            try:
+
+            error = validate_non_empty("query", query)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_retrieve", k_retrieve)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_return", k_return)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_metadata(filter_metadata)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+
+            async def _run() -> Dict[str, Any]:
                 # Search for candidates
                 candidates = await search_similar_chunks(
                     query=query,
                     k=k_retrieve,
                     filter_metadata=filter_metadata,
                 )
-                
+
                 if not candidates:
                     return {"query": query, "results": []}
-                
+
                 # Build document IDs for caching
                 doc_ids = []
                 for idx, doc in enumerate(candidates):
@@ -58,12 +75,12 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                         meta = doc.metadata or {}
                         doc_id = meta.get("chunkId") or meta.get("resourceId") or f"doc_{idx}"
                     doc_ids.append(str(doc_id))
-                
+
                 # Check cache
                 cache = get_cache()
                 cache_key = build_cache_key(query, doc_ids)
                 cached = cache.get(cache_key)
-                
+
                 if cached:
                     cached_map = {doc_id: score for doc_id, score in cached}
                     if all(doc_id in cached_map for doc_id in doc_ids):
@@ -73,40 +90,52 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                         top_docs = scored[:k_return]
                         results = [
                             {
-                                "id": doc_ids[idx],
+                                "id": doc_id,
                                 "content": doc.page_content,
                                 "metadata": doc.metadata or {},
                             }
-                            for idx, doc, _ in top_docs
+                            for _idx, doc, doc_id in top_docs
                         ]
                         return {"query": query, "results": results}
-                
+
                 # Rerank
                 reranker = get_reranker()
                 scored_docs = reranker.rerank_with_scores(query, candidates)
-                
+                scored_docs_with_ids = []
+                for idx, (doc, score) in enumerate(scored_docs):
+                    doc_id = doc_ids[idx] if idx < len(doc_ids) else f"doc_{idx}"
+                    scored_docs_with_ids.append((doc, score, doc_id))
+
                 # Cache results
                 scored_pairs = []
-                for i, (doc, score) in enumerate(scored_docs):
-                    if i < len(doc_ids):
-                        scored_pairs.append((doc_ids[i], score))
+                for doc, score, doc_id in scored_docs_with_ids:
+                    scored_pairs.append((doc_id, score))
                 cache.set(cache_key, scored_pairs)
-                
+
                 # Build response
                 results = []
-                for i, (doc, score) in enumerate(scored_docs[:k_return]):
-                    doc_id = doc_ids[i] if i < len(doc_ids) else f"doc_{i}"
+                for doc, score, doc_id in scored_docs_with_ids[:k_return]:
                     results.append({
                         "id": doc_id,
                         "content": doc.page_content,
                         "metadata": doc.metadata or {},
                         "score": score,
                     })
-                
+
                 return {"query": query, "results": results}
-            
+
+            try:
+                timeout = get_timeout("RERANK_TIMEOUT", 30.0)
+                return await asyncio.wait_for(_run(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return error_response(
+                    "TIMEOUT_ERROR",
+                    "Rerank request timed out",
+                    {"timeout_seconds": get_timeout("RERANK_TIMEOUT", 30.0)},
+                )
             except Exception as e:
-                return {"query": query, "results": [], "error": str(e)}
+                logger.error("rerank failed: %s", e)
+                return error_response("DB_ERROR", str(e))
     
     if is_tool_enabled(config, "rerank_with_context"):
         @mcp.tool()
@@ -132,48 +161,66 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             # Get reranked chunks using the rerank tool logic
             from db import search_similar_chunks
             from reranker import get_reranker
-            
-            try:
+
+            error = validate_non_empty("query", query)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_retrieve", k_retrieve)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_return", k_return)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_metadata(filter_metadata)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+
+            async def _run() -> Dict[str, Any]:
                 candidates = await search_similar_chunks(
                     query=query,
                     k=k_retrieve,
                     filter_metadata=filter_metadata,
                 )
-                
+
                 if not candidates:
                     return {"query": query, "chunks": [], "full_documents": []}
-                
+
                 reranker = get_reranker()
                 scored_docs = reranker.rerank_with_scores(query, candidates)
-                
+
                 chunks = []
-                patient_ids = set()
-                
                 for i, (doc, score) in enumerate(scored_docs[:k_return]):
                     doc_id = getattr(doc, "id", None)
                     if not doc_id:
                         meta = doc.metadata or {}
                         doc_id = meta.get("chunkId") or f"doc_{i}"
-                    
+
                     chunks.append({
                         "id": str(doc_id),
                         "content": doc.page_content,
                         "metadata": doc.metadata or {},
                         "score": score,
                     })
-                    
-                    if doc.metadata and doc.metadata.get("patientId"):
-                        patient_ids.add(doc.metadata["patientId"])
-                
+
                 result = {"query": query, "chunks": chunks, "full_documents": []}
-                
+
                 # TODO: If include_full_json, fetch full FHIR bundles
                 # This would require additional storage/retrieval logic
-                
+
                 return result
-            
+
+            try:
+                timeout = get_timeout("RERANK_TIMEOUT", 30.0)
+                return await asyncio.wait_for(_run(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return error_response(
+                    "TIMEOUT_ERROR",
+                    "Rerank with context timed out",
+                    {"timeout_seconds": get_timeout("RERANK_TIMEOUT", 30.0)},
+                )
             except Exception as e:
-                return {"query": query, "chunks": [], "full_documents": [], "error": str(e)}
+                logger.error("rerank_with_context failed: %s", e)
+                return error_response("DB_ERROR", str(e))
     
     if is_tool_enabled(config, "batch_rerank"):
         @mcp.tool()
@@ -198,6 +245,19 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 filter_metadata = item.get("filter_metadata")
                 
                 try:
+                    error = validate_non_empty("query", query)
+                    if error:
+                        return error_response("VALIDATION_ERROR", error)
+                    error = validate_k("k_retrieve", k_retrieve)
+                    if error:
+                        return error_response("VALIDATION_ERROR", error)
+                    error = validate_k("k_return", k_return)
+                    if error:
+                        return error_response("VALIDATION_ERROR", error)
+                    error = validate_metadata(filter_metadata)
+                    if error:
+                        return error_response("VALIDATION_ERROR", error)
+
                     candidates = await search_similar_chunks(
                         query=query,
                         k=k_retrieve,
@@ -224,16 +284,25 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                         })
                     
                     return {"query": query, "results": results}
-                
+
                 except Exception as e:
-                    return {"query": query, "results": [], "error": str(e)}
+                    logger.error("batch_rerank item failed: %s", e)
+                    return error_response("DB_ERROR", str(e), {"query": query})
             
             try:
                 tasks = [process_item(item) for item in items]
-                results = await asyncio.gather(*tasks)
+                timeout = get_timeout("RERANK_TIMEOUT", 30.0)
+                results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
                 return {"items": list(results)}
+            except asyncio.TimeoutError:
+                return error_response(
+                    "TIMEOUT_ERROR",
+                    "Batch rerank timed out",
+                    {"timeout_seconds": get_timeout("RERANK_TIMEOUT", 30.0)},
+                )
             except Exception as e:
-                return {"items": [], "error": str(e)}
+                logger.error("batch_rerank failed: %s", e)
+                return error_response("DB_ERROR", str(e))
     
     # Session tools
     if is_tool_enabled(config, "session_append_turn"):
@@ -261,6 +330,18 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from session import get_session_store
             
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_non_empty("role", role)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_non_empty("text", text)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("return_limit", return_limit, minimum=1, maximum=1000)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             try:
                 store = get_session_store()
                 store.append_turn(
@@ -280,7 +361,8 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                     "summary": summary,
                 }
             except Exception as e:
-                return {"session_id": session_id, "error": str(e)}
+                logger.error("session_append_turn failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"session_id": session_id})
     
     if is_tool_enabled(config, "session_get"):
         @mcp.tool()
@@ -299,6 +381,12 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from session import get_session_store
             
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("limit", limit, minimum=1, maximum=1000)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             try:
                 store = get_session_store()
                 recent = store.get_recent(session_id, limit=limit)
@@ -310,7 +398,8 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                     "summary": summary,
                 }
             except Exception as e:
-                return {"session_id": session_id, "error": str(e)}
+                logger.error("session_get failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"session_id": session_id})
     
     if is_tool_enabled(config, "session_update_summary"):
         @mcp.tool()
@@ -331,6 +420,9 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from session import get_session_store
             
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             try:
                 store = get_session_store()
                 store.update_summary(
@@ -342,7 +434,8 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 
                 return {"session_id": session_id, "summary": updated}
             except Exception as e:
-                return {"session_id": session_id, "error": str(e)}
+                logger.error("session_update_summary failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"session_id": session_id})
     
     if is_tool_enabled(config, "session_clear"):
         @mcp.tool()
@@ -357,9 +450,13 @@ def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from session import get_session_store
             
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             try:
                 store = get_session_store()
                 store.clear_session(session_id)
                 return {"status": "cleared", "session_id": session_id}
             except Exception as e:
-                return {"status": "error", "error": str(e)}
+                logger.error("session_clear failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"session_id": session_id})

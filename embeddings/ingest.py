@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,7 @@ class IngestRequest(BaseModel):
     resource_json: str = Field(default="", alias="resourceJson", description="Original JSON for chunking")
     source_file: str = Field(default="", alias="sourceFile", description="Source file path")
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 @dataclass

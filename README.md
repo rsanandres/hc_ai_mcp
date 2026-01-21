@@ -14,7 +14,7 @@ A standalone Model Context Protocol (MCP) server that exposes healthcare AI tool
 
 - Python 3.11+
 - PostgreSQL 14+ with pgvector extension
-- Ollama (for local LLM and embeddings) OR AWS credentials (for Bedrock)
+- Ollama (for local LLM and embeddings) OR cloud credentials (Bedrock/OpenAI/Anthropic)
 
 ## Quick Start
 
@@ -141,8 +141,32 @@ See `env.example` for all available configuration options:
 | `DB_NAME` | Database name | `hc_ai` |
 | `DB_PASSWORD` | Database password | (required) |
 | `EMBEDDING_PROVIDER` | `ollama` or `bedrock` | `ollama` |
-| `LLM_PROVIDER` | `ollama` or `bedrock` | `ollama` |
+| `LLM_PROVIDER` | `ollama`, `bedrock`, `openai`, `anthropic` | `ollama` |
 | `RERANKER_MODEL` | Cross-encoder model | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+
+### Multi-LLM Setup
+
+- **Ollama**: set `LLM_PROVIDER=ollama` and `LLM_MODEL=llama3`
+- **Bedrock**: set `LLM_PROVIDER=bedrock`, `AWS_REGION`, and `LLM_MODEL` (e.g., `haiku`, `sonnet`, `opus`)
+- **OpenAI**: set `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL` (e.g., `gpt-4o-mini`)
+- **Anthropic**: set `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` (e.g., `claude-3-5-sonnet-20241022`)
+
+### Debug Logging
+
+Enable verbose logging by setting:
+
+```
+HC_AI_DEBUG=true
+```
+
+### Timeouts
+
+Configure tool timeouts:
+
+```
+AGENT_TIMEOUT=60
+RERANK_TIMEOUT=30
+```
 
 ## Available Tools
 

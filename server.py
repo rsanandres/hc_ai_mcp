@@ -29,13 +29,13 @@ if str(package_dir) not in sys.path:
 
 from dotenv import load_dotenv
 
+from logging_config import get_logger
+
 # Load .env from this directory
 load_dotenv(package_dir / ".env")
 
 
-def log(message: str) -> None:
-    """Log message to stderr (stdout is reserved for MCP protocol)."""
-    print(message, file=sys.stderr)
+logger = get_logger("hc_ai.server")
 
 
 def main() -> None:
@@ -82,13 +82,20 @@ Examples:
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as e:
-        log(f"Error: MCP package not installed. Run: pip install mcp")
-        log(f"Details: {e}")
+        logger.error("Error: MCP package not installed. Run: pip install mcp")
+        logger.error("Details: %s", e)
         sys.exit(1)
     
-    from config import load_config, get_server_config
+    from config import load_config, get_server_config, validate_env
     from tools import register_agent_tools, register_retrieval_tools, register_embeddings_tools
     
+    # Validate environment
+    env_errors = validate_env()
+    if env_errors:
+        for error in env_errors:
+            logger.error("Environment validation error: %s", error)
+        sys.exit(1)
+
     # Load configuration
     config = load_config(args.config)
     server_config = get_server_config(config)
@@ -101,9 +108,9 @@ Examples:
     mcp = FastMCP(name=server_name)
     
     # Register tools based on configuration
-    log(f"Starting {server_name}...")
-    log(f"Transport: {transport}")
-    log(f"Registering tools...")
+    logger.info("Starting %s...", server_name)
+    logger.info("Transport: %s", transport)
+    logger.info("Registering tools...")
     
     register_agent_tools(mcp, config)
     register_retrieval_tools(mcp, config)
@@ -114,24 +121,24 @@ Examples:
         1 for tool_name, tool_config in config.get("tools", {}).items()
         if tool_config.get("enabled", False)
     )
-    log(f"Registered {enabled_count} tools")
+    logger.info("Registered %s tools", enabled_count)
     
     # Run server
     if transport == "streamable-http":
         # Set host/port via environment variables for uvicorn
         os.environ["UVICORN_HOST"] = args.host
         os.environ["UVICORN_PORT"] = str(args.port)
-        log(f"Running on http://{args.host}:{args.port}")
+        logger.info("Running on http://%s:%s", args.host, args.port)
         # For streamable-http, we need to run the ASGI app directly
         try:
             import uvicorn
             app = mcp.streamable_http_app()
             uvicorn.run(app, host=args.host, port=args.port)
         except ImportError:
-            log("Error: uvicorn is required for HTTP transport. Run: pip install uvicorn")
+            logger.error("Error: uvicorn is required for HTTP transport. Run: pip install uvicorn")
             sys.exit(1)
     else:
-        log("Running with stdio transport")
+        logger.info("Running with stdio transport")
         mcp.run(transport="stdio")
 
 

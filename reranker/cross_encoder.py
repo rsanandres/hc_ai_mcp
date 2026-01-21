@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 from dotenv import load_dotenv
 
@@ -11,6 +11,11 @@ load_dotenv()
 
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", "auto")
+
+from logging_config import get_logger
+from reranker.cache import build_cache_key, get_cache
+
+logger = get_logger("hc_ai.reranker")
 
 
 def _resolve_device(device: str) -> str:
@@ -76,7 +81,7 @@ class Reranker:
         scores = self._model.predict(pairs)
         return [float(score) for score in scores]
     
-    def rerank(self, query: str, docs: List[any], top_k: int) -> List[any]:
+    def rerank(self, query: str, docs: List[Any], top_k: int) -> List[Any]:
         """Rerank documents by relevance to query.
         
         Args:
@@ -98,8 +103,8 @@ class Reranker:
     def rerank_with_scores(
         self,
         query: str,
-        docs: List[any],
-    ) -> List[Tuple[any, float]]:
+        docs: List[Any],
+    ) -> List[Tuple[Any, float]]:
         """Rerank documents and return with scores.
         
         Args:
@@ -112,7 +117,27 @@ class Reranker:
         if not docs:
             return []
         contents = [doc.page_content for doc in docs]
-        scores = self.score(query, contents)
+        doc_ids: List[str] = []
+        for idx, doc in enumerate(docs):
+            doc_id = getattr(doc, "id", None)
+            if not doc_id:
+                meta = getattr(doc, "metadata", {}) or {}
+                doc_id = meta.get("chunkId") or meta.get("resourceId") or f"doc_{idx}"
+            doc_ids.append(str(doc_id))
+
+        scores: List[float] = []
+        cache = get_cache()
+        cache_key = build_cache_key(query, doc_ids)
+        cached = cache.get(cache_key)
+        if cached:
+            cached_map = {doc_id: score for doc_id, score in cached}
+            if all(doc_id in cached_map for doc_id in doc_ids):
+                scores = [float(cached_map[doc_id]) for doc_id in doc_ids]
+                logger.debug("Reranker cache hit for %s docs", len(doc_ids))
+
+        if not scores:
+            scores = self.score(query, contents)
+            cache.set(cache_key, list(zip(doc_ids, scores)))
         scored_docs = [(idx, doc, score) for idx, (doc, score) in enumerate(zip(docs, scores))]
         scored_docs.sort(key=lambda item: (-item[2], item[0]))
         return [(doc, score) for _idx, doc, score in scored_docs]
@@ -120,9 +145,9 @@ class Reranker:
     def rerank_batch(
         self,
         queries: List[str],
-        docs_list: List[List[any]],
+        docs_list: List[List[Any]],
         top_k: int,
-    ) -> List[List[any]]:
+    ) -> List[List[Any]]:
         """Rerank multiple query-document sets.
         
         Args:
@@ -135,7 +160,7 @@ class Reranker:
         """
         if len(queries) != len(docs_list):
             raise ValueError("queries and docs_list length mismatch")
-        results: List[List[any]] = []
+        results: List[List[Any]] = []
         for query, docs in zip(queries, docs_list):
             results.append(self.rerank(query, docs, top_k))
         return results

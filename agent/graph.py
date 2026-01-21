@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 import yaml
 from dotenv import load_dotenv
 
+from logging_config import get_logger
+
 load_dotenv()
+
+logger = get_logger("hc_ai.agent")
 
 
 class AgentState(TypedDict, total=False):
@@ -31,15 +37,21 @@ class AgentState(TypedDict, total=False):
 
 # Global agent instance
 _AGENT: Any = None
+_PROMPTS_CACHE: Dict[str, Any] | None = None
 
 
 def _load_prompts() -> Dict[str, Any]:
-    """Load prompts from YAML file."""
+    """Load prompts from YAML file (cached)."""
+    global _PROMPTS_CACHE
+    if _PROMPTS_CACHE is not None:
+        return _PROMPTS_CACHE
     prompts_path = Path(__file__).parent / "prompts.yaml"
     if prompts_path.exists():
         with open(prompts_path) as f:
-            return yaml.safe_load(f) or {}
-    return {}
+            _PROMPTS_CACHE = yaml.safe_load(f) or {}
+            return _PROMPTS_CACHE
+    _PROMPTS_CACHE = {}
+    return _PROMPTS_CACHE
 
 
 def _get_researcher_prompt(patient_id: Optional[str] = None) -> str:
@@ -49,17 +61,24 @@ def _get_researcher_prompt(patient_id: Optional[str] = None) -> str:
     base_prompt = researcher.get("system_prompt", "You are a medical research assistant.")
     
     fragments = prompts.get("fragments", {})
+    hipaa = fragments.get("hipaa_compliance", "")
+    fhir_criteria = fragments.get("fhir_json_criteria", "")
+    confidence = fragments.get("confidence_scoring", "")
     safety = fragments.get("safety_reminder", "")
     citation = fragments.get("citation_format", "")
     
     prompt = base_prompt
-    if safety:
-        prompt += "\n\n" + safety
-    if citation:
-        prompt += "\n\n" + citation
+    for fragment in (hipaa, fhir_criteria, confidence, safety, citation):
+        if fragment:
+            prompt += "\n\n" + fragment
     
     if patient_id:
-        patient_context = fragments.get("patient_context", "").format(patient_id=patient_id)
+        patient_context_template = fragments.get("patient_context", "")
+        try:
+            patient_context = patient_context_template.format(patient_id=patient_id)
+        except Exception as exc:
+            logger.warning("Failed to format patient_context: %s", exc)
+            patient_context = ""
         if patient_context:
             prompt += "\n\n" + patient_context
     
@@ -70,7 +89,18 @@ def _get_validator_prompt() -> str:
     """Get the validator system prompt."""
     prompts = _load_prompts()
     validator = prompts.get("validator", {})
-    return validator.get("system_prompt", "You are a medical validator.")
+    fragments = prompts.get("fragments", {})
+    hipaa = fragments.get("hipaa_compliance", "")
+    fhir_criteria = fragments.get("fhir_json_criteria", "")
+    confidence = fragments.get("confidence_scoring", "")
+    safety = fragments.get("safety_reminder", "")
+
+    base_prompt = validator.get("system_prompt", "You are a medical validator.")
+    prompt = base_prompt
+    for fragment in (hipaa, fhir_criteria, confidence, safety):
+        if fragment:
+            prompt += "\n\n" + fragment
+    return prompt
 
 
 def _extract_tool_calls(messages: List[Any]) -> List[str]:
@@ -98,7 +128,6 @@ async def _researcher_node(state: AgentState) -> AgentState:
     from agent.config import get_llm
     from db.vector_store import search_similar_chunks
     
-    max_iterations = int(os.getenv("AGENT_MAX_ITERATIONS", "10"))
     system_prompt = _get_researcher_prompt(state.get("patient_id"))
     
     query = state.get("query", "")
@@ -110,11 +139,15 @@ async def _researcher_node(state: AgentState) -> AgentState:
     if state.get("patient_id"):
         filter_metadata = {"patientId": state["patient_id"]}
     
-    docs = await search_similar_chunks(
-        query=query,
-        k=k_retrieve,
-        filter_metadata=filter_metadata,
-    )
+    try:
+        docs = await search_similar_chunks(
+            query=query,
+            k=k_retrieve,
+            filter_metadata=filter_metadata,
+        )
+    except Exception as exc:
+        logger.error("Vector search failed: %s", exc)
+        docs = []
     
     # Build context from documents
     context_parts = []
@@ -132,24 +165,45 @@ async def _researcher_node(state: AgentState) -> AgentState:
     # Build messages
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
-        
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Context:\n{context}\n\nQuestion: {query}"),
         ]
-        
+
         if state.get("validator_output"):
             messages.append(
                 SystemMessage(content=f"Validator feedback:\n{state['validator_output']}")
             )
-        
+
         llm = get_llm()
-        response = await llm.ainvoke(messages)
-        response_text = response.content if hasattr(response, "content") else str(response)
-        
+        max_retries = int(os.getenv("LLM_RETRY_MAX", "2"))
+        attempt = 0
+        last_exc: Exception | None = None
+        response_text = ""
+        while attempt <= max_retries:
+            try:
+                response = await llm.ainvoke(messages)
+                response_text = response.content if hasattr(response, "content") else str(response)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("LLM call failed (attempt %s/%s): %s", attempt + 1, max_retries + 1, exc)
+                await asyncio.sleep(0.25 * (attempt + 1))
+                attempt += 1
+        if last_exc is not None:
+            raise last_exc
+
     except ImportError:
         # Fallback if langchain not available
         response_text = f"Based on the query '{query}', I found {len(docs)} relevant documents."
+    except Exception as exc:
+        logger.error("Researcher LLM call failed: %s", exc)
+        response_text = (
+            "An internal error occurred while generating the response. "
+            "Please retry or contact support."
+        )
     
     tools_called = state.get("tools_called", []) + ["search_similar_chunks"]
     
@@ -229,7 +283,8 @@ def _route_after_validation(state: AgentState) -> str:
     
     if validation_result in {"PASS", "FAIL"}:
         return "respond"
-    if state.get("iteration_count", 0) >= 2:
+    max_iterations = int(os.getenv("AGENT_MAX_ITERATIONS", "10"))
+    if state.get("iteration_count", 0) >= max_iterations:
         return "respond"
     return "researcher"
 

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from config import is_tool_enabled
+from logging_config import get_logger
+from tools.utils import error_response, get_timeout, validate_k, validate_non_empty
+
+logger = get_logger("hc_ai.tools.agent")
 
 
 def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
@@ -40,8 +45,18 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
             from agent import get_agent
             from session import get_session_store
             
-            if not query.strip():
-                return {"error": "Query is required", "status": "error"}
+            error = validate_non_empty("query", query)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_retrieve", k_retrieve)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_k("k_return", k_return)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             
             try:
                 agent = get_agent()
@@ -56,7 +71,11 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
                     "iteration_count": 0,
                 }
                 
-                result = await agent.ainvoke(state, config={"recursion_limit": max_iterations})
+                timeout = get_timeout("AGENT_TIMEOUT", 60.0)
+                result = await asyncio.wait_for(
+                    agent.ainvoke(state, config={"recursion_limit": max_iterations}),
+                    timeout=timeout,
+                )
                 
                 response_text = result.get("final_response") or result.get("researcher_output", "")
                 
@@ -79,8 +98,15 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
                     "validation_result": result.get("validation_result"),
                     "status": "success",
                 }
+            except asyncio.TimeoutError:
+                return error_response(
+                    "TIMEOUT_ERROR",
+                    "Agent request timed out",
+                    {"timeout_seconds": get_timeout("AGENT_TIMEOUT", 60.0)},
+                )
             except Exception as e:
-                return {"error": str(e), "status": "error"}
+                logger.error("agent_query failed: %s", e)
+                return error_response("LLM_ERROR", str(e))
     
     if is_tool_enabled(config, "agent_clear_session"):
         @mcp.tool()
@@ -95,12 +121,16 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from session import get_session_store
             
+            error = validate_non_empty("session_id", session_id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
             try:
                 store = get_session_store()
                 store.clear_session(session_id)
                 return {"status": "cleared", "session_id": session_id}
             except Exception as e:
-                return {"status": "error", "error": str(e)}
+                logger.error("agent_clear_session failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"session_id": session_id})
     
     if is_tool_enabled(config, "agent_health"):
         @mcp.tool()

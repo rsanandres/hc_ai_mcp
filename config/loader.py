@@ -4,12 +4,38 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
+from pydantic import BaseModel, Field, ValidationError
+
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.config")
 
 
 _CONFIG_CACHE: Dict[str, Any] | None = None
+
+
+class ToolConfig(BaseModel):
+    """Tool configuration schema."""
+
+    enabled: bool = False
+    description: str | None = None
+
+
+class ServerConfig(BaseModel):
+    """Server configuration schema."""
+
+    name: str = "HC-AI MCP Server"
+    transport: str = Field(default="stdio", pattern="^(stdio|streamable-http)$")
+
+
+class AppConfig(BaseModel):
+    """Top-level configuration schema."""
+
+    server: ServerConfig = ServerConfig()
+    tools: Dict[str, ToolConfig] = Field(default_factory=dict)
 
 
 def load_config(config_path: str | Path | None = None) -> Dict[str, Any]:
@@ -23,7 +49,7 @@ def load_config(config_path: str | Path | None = None) -> Dict[str, Any]:
     """
     global _CONFIG_CACHE
     
-    if _CONFIG_CACHE is not None:
+    if _CONFIG_CACHE is not None and config_path is None:
         return _CONFIG_CACHE
     
     if config_path is None:
@@ -33,17 +59,25 @@ def load_config(config_path: str | Path | None = None) -> Dict[str, Any]:
     
     if not config_path.exists():
         # Return default config if file doesn't exist
-        return _default_config()
+        _CONFIG_CACHE = _default_config()
+        return _CONFIG_CACHE
     
     with open(config_path, "r") as f:
-        _CONFIG_CACHE = yaml.safe_load(f) or {}
-    
+        raw_config = yaml.safe_load(f) or {}
+
+    try:
+        validated = AppConfig.model_validate(raw_config)
+        _CONFIG_CACHE = validated.model_dump()
+    except ValidationError as exc:
+        logger.error("Invalid config.yaml: %s", exc)
+        raise ValueError("Invalid configuration file") from exc
+
     return _CONFIG_CACHE
 
 
 def _default_config() -> Dict[str, Any]:
     """Return default configuration with all tools enabled."""
-    return {
+    default = {
         "server": {
             "name": "HC-AI MCP Server",
             "transport": "stdio",
@@ -66,6 +100,8 @@ def _default_config() -> Dict[str, Any]:
             "db_errors": {"enabled": True},
         },
     }
+    validated = AppConfig.model_validate(default)
+    return validated.model_dump()
 
 
 def is_tool_enabled(config: Dict[str, Any], tool_name: str) -> bool:
@@ -103,3 +139,30 @@ def reload_config() -> Dict[str, Any]:
     global _CONFIG_CACHE
     _CONFIG_CACHE = None
     return load_config()
+
+
+def validate_env() -> List[str]:
+    """Validate required environment variables."""
+    errors: List[str] = []
+
+    db_password = os.getenv("DB_PASSWORD")
+    if not db_password:
+        errors.append("DB_PASSWORD is required")
+
+    llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    if llm_provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+        errors.append("OPENAI_API_KEY is required for LLM_PROVIDER=openai")
+    if llm_provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+        errors.append("ANTHROPIC_API_KEY is required for LLM_PROVIDER=anthropic")
+    if llm_provider == "bedrock" and not os.getenv("AWS_REGION"):
+        errors.append("AWS_REGION is required for LLM_PROVIDER=bedrock")
+
+    embedding_provider = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
+    if embedding_provider == "bedrock" and not os.getenv("AWS_REGION"):
+        errors.append("AWS_REGION is required for EMBEDDING_PROVIDER=bedrock")
+
+    session_provider = os.getenv("SESSION_PROVIDER", "memory").lower()
+    if session_provider == "dynamodb" and not os.getenv("AWS_REGION"):
+        errors.append("AWS_REGION is required for SESSION_PROVIDER=dynamodb")
+
+    return errors

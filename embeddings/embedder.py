@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
-from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.embeddings")
 
 # Embedding provider configuration
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
@@ -20,10 +22,13 @@ EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
 # Ollama configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large:latest")
+OLLAMA_EMBED_BATCH_SIZE = int(os.getenv("OLLAMA_EMBED_BATCH_SIZE", "8"))
+OLLAMA_EMBED_MAX_PARALLEL = int(os.getenv("OLLAMA_EMBED_MAX_PARALLEL", "4"))
 
 # Bedrock configuration (future)
 BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
 BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v1")
+BEDROCK_EMBED_BATCH_SIZE = int(os.getenv("BEDROCK_EMBED_BATCH_SIZE", "4"))
 
 
 def get_embedding(text: str) -> Optional[List[float]]:
@@ -62,6 +67,29 @@ def get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
         return None
 
 
+def _chunked(items: List[str], size: int) -> Iterable[List[str]]:
+    """Yield lists of items in batches."""
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def _ollama_embed_single(session: requests.Session, text: str) -> List[float]:
+    """Embed a single text via Ollama."""
+    response = session.post(
+        f"{OLLAMA_BASE_URL}/api/embeddings",
+        json={
+            "model": OLLAMA_EMBED_MODEL,
+            "prompt": text,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    result = response.json()
+    if "embedding" not in result:
+        raise ValueError(f"Unexpected response format from Ollama: {result}")
+    return result["embedding"]
+
+
 def _get_embeddings_ollama(texts: List[str]) -> Optional[List[List[float]]]:
     """Get embeddings using Ollama API.
     
@@ -72,26 +100,23 @@ def _get_embeddings_ollama(texts: List[str]) -> Optional[List[List[float]]]:
         List of embedding vectors or None if failed.
     """
     try:
-        embeddings = []
-        for text in texts:
-            response = requests.post(
-                f"{OLLAMA_BASE_URL}/api/embeddings",
-                json={
-                    "model": OLLAMA_EMBED_MODEL,
-                    "prompt": text,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            result = response.json()
-            if "embedding" in result:
-                embeddings.append(result["embedding"])
-            else:
-                logger.warning(f"Unexpected response format from Ollama: {result}")
-                return None
+        embeddings: List[List[float]] = []
+        batch_size = max(1, OLLAMA_EMBED_BATCH_SIZE)
+        with requests.Session() as session:
+            for batch in _chunked(texts, batch_size):
+                if len(batch) == 1:
+                    embeddings.append(_ollama_embed_single(session, batch[0]))
+                    continue
+                max_workers = min(OLLAMA_EMBED_MAX_PARALLEL, len(batch))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    results = list(executor.map(lambda text: _ollama_embed_single(session, text), batch))
+                    embeddings.extend(results)
         return embeddings
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling Ollama API: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Ollama embedding error: {e}")
         return None
 
 
@@ -109,21 +134,23 @@ def _get_embeddings_bedrock(texts: List[str]) -> Optional[List[List[float]]]:
         
         client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
         embeddings = []
-        
-        for text in texts:
-            body = json.dumps({"inputText": text})
-            response = client.invoke_model(
-                modelId=BEDROCK_EMBED_MODEL,
-                body=body,
-                contentType="application/json",
-                accept="application/json",
-            )
-            result = json.loads(response["body"].read())
-            if "embedding" in result:
-                embeddings.append(result["embedding"])
-            else:
-                logger.warning(f"Unexpected response format from Bedrock: {result}")
-                return None
+        batch_size = max(1, BEDROCK_EMBED_BATCH_SIZE)
+
+        for batch in _chunked(texts, batch_size):
+            for text in batch:
+                body = json.dumps({"inputText": text})
+                response = client.invoke_model(
+                    modelId=BEDROCK_EMBED_MODEL,
+                    body=body,
+                    contentType="application/json",
+                    accept="application/json",
+                )
+                result = json.loads(response["body"].read())
+                if "embedding" in result:
+                    embeddings.append(result["embedding"])
+                else:
+                    logger.warning(f"Unexpected response format from Bedrock: {result}")
+                    return None
         return embeddings
     except ImportError:
         logger.error("boto3 is required for Bedrock embeddings. Install with: pip install boto3")

@@ -24,7 +24,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
+
+from logging_config import get_logger
+
 load_dotenv(Path(__file__).parent.parent / ".env")
+
+logger = get_logger("hc_ai.ingest")
 
 
 async def ingest_fhir_bundle(bundle_path: Path, patient_id: str | None = None) -> dict:
@@ -39,7 +44,7 @@ async def ingest_fhir_bundle(bundle_path: Path, patient_id: str | None = None) -
     """
     from embeddings import process_and_store, IngestRequest
     
-    print(f"\nProcessing: {bundle_path}")
+    logger.info("Processing: %s", bundle_path)
     
     with open(bundle_path, "r") as f:
         bundle = json.load(f)
@@ -100,11 +105,17 @@ async def ingest_fhir_bundle(bundle_path: Path, patient_id: str | None = None) -
             if result.errors:
                 results["errors"].extend(result.errors)
             
-            print(f"  {resource_type}/{resource_id}: {result.chunks_stored}/{result.chunks_created} chunks")
+            logger.info(
+                "%s/%s: %s/%s chunks",
+                resource_type,
+                resource_id,
+                result.chunks_stored,
+                result.chunks_created,
+            )
         
         except Exception as e:
             results["errors"].append(f"{resource_type}/{resource_id}: {str(e)}")
-            print(f"  {resource_type}/{resource_id}: ERROR - {e}")
+            logger.error("%s/%s: ERROR - %s", resource_type, resource_id, e)
     
     return results
 
@@ -198,7 +209,7 @@ async def main():
     path = Path(args.path)
     
     if not path.exists():
-        print(f"Error: Path does not exist: {path}")
+        logger.error("Error: Path does not exist: %s", path)
         sys.exit(1)
     
     # Collect files to process
@@ -207,10 +218,10 @@ async def main():
     else:
         files = list(path.glob("*.json"))
         if not files:
-            print(f"No JSON files found in: {path}")
+            logger.error("No JSON files found in: %s", path)
             sys.exit(1)
     
-    print(f"Found {len(files)} file(s) to process")
+    logger.info("Found %s file(s) to process", len(files))
     
     # Process each file
     total_results = {
@@ -230,25 +241,25 @@ async def main():
             total_results["chunks_stored"] += result["chunks_stored"]
             total_results["errors"].extend(result["errors"])
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            logger.error("Error processing %s: %s", file_path, e)
             total_results["errors"].append(f"{file_path}: {str(e)}")
     
     # Print summary
-    print("\n" + "=" * 60)
-    print("INGESTION SUMMARY")
-    print("=" * 60)
-    print(f"Files processed:     {total_results['files_processed']}")
-    print(f"Resources processed: {total_results['resources_processed']}")
-    print(f"Chunks created:      {total_results['chunks_created']}")
-    print(f"Chunks stored:       {total_results['chunks_stored']}")
-    print(f"Errors:              {len(total_results['errors'])}")
+    logger.info("%s", "=" * 60)
+    logger.info("INGESTION SUMMARY")
+    logger.info("%s", "=" * 60)
+    logger.info("Files processed:     %s", total_results["files_processed"])
+    logger.info("Resources processed: %s", total_results["resources_processed"])
+    logger.info("Chunks created:      %s", total_results["chunks_created"])
+    logger.info("Chunks stored:       %s", total_results["chunks_stored"])
+    logger.info("Errors:              %s", len(total_results["errors"]))
     
     if total_results["errors"]:
-        print("\nErrors:")
+        logger.info("Errors:")
         for error in total_results["errors"][:10]:
-            print(f"  - {error}")
+            logger.info("  - %s", error)
         if len(total_results["errors"]) > 10:
-            print(f"  ... and {len(total_results['errors']) - 10} more")
+            logger.info("  ... and %s more", len(total_results["errors"]) - 10)
 
 
 if __name__ == "__main__":

@@ -8,17 +8,23 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from logging_config import get_logger
+
 load_dotenv()
+
+logger = get_logger("hc_ai.session")
 
 # Session configuration
 SESSION_PROVIDER = os.getenv("SESSION_PROVIDER", "memory").lower()
 SESSION_RECENT_LIMIT = int(os.getenv("SESSION_RECENT_LIMIT", "10"))
 SESSION_TTL_DAYS = os.getenv("SESSION_TTL_DAYS", "")
+SESSION_MAX_SESSIONS = int(os.getenv("SESSION_MAX_SESSIONS", "1000"))
+SESSION_CLEANUP_INTERVAL_SECONDS = int(os.getenv("SESSION_CLEANUP_INTERVAL_SECONDS", "300"))
 
 # DynamoDB configuration (optional)
 DDB_REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -30,7 +36,7 @@ DDB_AUTO_CREATE = os.getenv("DDB_AUTO_CREATE", "false").lower() in {"1", "true",
 
 def _utc_iso() -> str:
     """Get current UTC time as ISO string."""
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _ttl_epoch(ttl_days: Optional[int]) -> Optional[int]:
@@ -86,14 +92,29 @@ class SessionStore:
         self.provider = provider
         self.max_recent = max_recent
         
-        if SESSION_TTL_DAYS and SESSION_TTL_DAYS.isdigit():
-            self.ttl_days = int(SESSION_TTL_DAYS)
+        env_ttl_days = os.getenv("SESSION_TTL_DAYS", SESSION_TTL_DAYS)
+        if env_ttl_days and env_ttl_days.isdigit():
+            self.ttl_days = int(env_ttl_days)
         else:
             self.ttl_days = ttl_days
+
+        env_max_sessions = os.getenv("SESSION_MAX_SESSIONS", str(SESSION_MAX_SESSIONS))
+        self._max_sessions = int(env_max_sessions) if env_max_sessions.isdigit() else SESSION_MAX_SESSIONS
+
+        env_cleanup_interval = os.getenv(
+            "SESSION_CLEANUP_INTERVAL_SECONDS",
+            str(SESSION_CLEANUP_INTERVAL_SECONDS),
+        )
+        if env_cleanup_interval.isdigit():
+            self._cleanup_interval_seconds = int(env_cleanup_interval)
+        else:
+            self._cleanup_interval_seconds = SESSION_CLEANUP_INTERVAL_SECONDS
         
         # In-memory storage
         self._turns: Dict[str, List[Dict[str, Any]]] = {}
         self._summaries: Dict[str, Dict[str, Any]] = {}
+        self._last_access: Dict[str, float] = {}
+        self._last_cleanup = 0.0
         
         # DynamoDB tables (lazy initialized)
         self._ddb_resource = None
@@ -205,12 +226,15 @@ class SessionStore:
             self._turns_table.put_item(Item=item)
         else:
             # In-memory storage
+            self._cleanup_if_needed()
             if session_id not in self._turns:
                 self._turns[session_id] = []
             self._turns[session_id].append(turn.to_dict())
+            self._last_access[session_id] = time.time()
             # Trim to max_recent * 2 to allow some buffer
             if len(self._turns[session_id]) > self.max_recent * 2:
                 self._turns[session_id] = self._turns[session_id][-self.max_recent * 2:]
+            self._enforce_session_limit()
         
         return turn
     
@@ -241,7 +265,10 @@ class SessionStore:
             )
             return resp.get("Items", [])
         else:
+            self._cleanup_if_needed()
             turns = self._turns.get(session_id, [])
+            if turns:
+                self._last_access[session_id] = time.time()
             # Return newest first
             return list(reversed(turns[-lim:]))
     
@@ -283,12 +310,15 @@ class SessionStore:
                 ExpressionAttributeValues=values,
             )
         else:
+            self._cleanup_if_needed()
             if session_id not in self._summaries:
                 self._summaries[session_id] = {}
             self._summaries[session_id].update(summary)
             self._summaries[session_id]["updated_at"] = _utc_iso()
             if patient_id:
                 self._summaries[session_id]["patient_id"] = patient_id
+            self._last_access[session_id] = time.time()
+            self._enforce_session_limit()
     
     def get_summary(self, session_id: str) -> Dict[str, Any]:
         """Get the session summary.
@@ -306,6 +336,7 @@ class SessionStore:
             )
             return resp.get("Item", {})
         else:
+            self._cleanup_if_needed()
             return self._summaries.get(session_id, {})
     
     def clear_session(self, session_id: str) -> None:
@@ -356,6 +387,41 @@ class SessionStore:
         else:
             self._turns.pop(session_id, None)
             self._summaries.pop(session_id, None)
+            self._last_access.pop(session_id, None)
+
+    def _cleanup_if_needed(self) -> None:
+        """Cleanup stale in-memory sessions based on TTL and interval."""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval_seconds:
+            return
+        self._last_cleanup = now
+
+        if not self.ttl_days or self.ttl_days <= 0:
+            return
+
+        ttl_seconds = self.ttl_days * 86400
+        expired = [sid for sid, ts in self._last_access.items() if now - ts > ttl_seconds]
+        for sid in expired:
+            self._turns.pop(sid, None)
+            self._summaries.pop(sid, None)
+            self._last_access.pop(sid, None)
+        if expired:
+            logger.info("Cleaned up %s expired sessions", len(expired))
+
+    def _enforce_session_limit(self) -> None:
+        """Enforce a max session limit in memory."""
+        if self._max_sessions <= 0:
+            return
+        if len(self._last_access) <= self._max_sessions:
+            return
+        # Evict least recently used sessions
+        sorted_sessions = sorted(self._last_access.items(), key=lambda item: item[1])
+        to_evict = len(self._last_access) - self._max_sessions
+        for sid, _ts in sorted_sessions[:to_evict]:
+            self._turns.pop(sid, None)
+            self._summaries.pop(sid, None)
+            self._last_access.pop(sid, None)
+        logger.info("Evicted %s sessions to enforce limit", to_evict)
 
 
 # Global session store instance

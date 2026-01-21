@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
+
+from logging_config import get_logger
 from langchain_core.documents import Document
 
 # Load environment from package directory
 load_dotenv()
+
+logger = get_logger("hc_ai.db")
 
 # Database configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -52,12 +57,14 @@ _pg_engine = None
 _vector_store = None
 _queue: Optional[asyncio.Queue] = None
 _queue_worker_task = None
+_queue_worker_lock = threading.Lock()
 _queue_stats = {
     "queued": 0,
     "processed": 0,
     "failed": 0,
     "retries": 0,
 }
+_queue_stats_lock = threading.Lock()
 _error_log: List[Dict[str, Any]] = []
 
 
@@ -214,8 +221,9 @@ async def _start_queue_worker():
     if _queue is None:
         _queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
     
-    if _queue_worker_task is None or _queue_worker_task.done():
-        _queue_worker_task = asyncio.create_task(_queue_worker())
+    with _queue_worker_lock:
+        if _queue_worker_task is None or _queue_worker_task.done():
+            _queue_worker_task = asyncio.create_task(_queue_worker())
 
 
 async def _queue_worker():
@@ -242,18 +250,21 @@ async def _queue_worker():
                 metadata=queued_chunk.metadata,
             )
             if success:
-                _queue_stats["processed"] += 1
+                with _queue_stats_lock:
+                    _queue_stats["processed"] += 1
             else:
                 raise Exception("Unknown failure during store_chunk_direct")
         except Exception as e:
             classification = _classify_error(e)
             if classification == "retryable" and queued_chunk.retry_count < MAX_RETRIES:
                 queued_chunk.retry_count += 1
-                _queue_stats["retries"] += 1
+                with _queue_stats_lock:
+                    _queue_stats["retries"] += 1
                 try:
                     await _queue.put(queued_chunk)
                 except asyncio.QueueFull:
-                    _queue_stats["failed"] += 1
+                    with _queue_stats_lock:
+                        _queue_stats["failed"] += 1
                     await _log_error(
                         chunk_id=queued_chunk.chunk_id,
                         error_type="queue_full",
@@ -262,7 +273,8 @@ async def _queue_worker():
                         retry_count=queued_chunk.retry_count,
                     )
             else:
-                _queue_stats["failed"] += 1
+                with _queue_stats_lock:
+                    _queue_stats["failed"] += 1
                 error_type = "max_retries" if queued_chunk.retry_count >= MAX_RETRIES else "fatal"
                 await _log_error(
                     chunk_id=queued_chunk.chunk_id,
@@ -336,10 +348,12 @@ async def store_chunk(
                     first_queued_at=time.time(),
                 )
                 await _queue.put(q_item)
-                _queue_stats["queued"] += 1
+                with _queue_stats_lock:
+                    _queue_stats["queued"] += 1
                 return False
             except asyncio.QueueFull:
-                _queue_stats["failed"] += 1
+                with _queue_stats_lock:
+                    _queue_stats["failed"] += 1
                 await _log_error(
                     chunk_id=chunk_id,
                     error_type="queue_full",
@@ -403,12 +417,14 @@ async def search_similar_chunks(
         )
         return results
     except Exception as e:
-        print(f"Error searching chunks: {e}")
-        return []
+        logger.error("Error searching chunks: %s", e)
+        raise
 
 
 async def get_connection_stats() -> Dict[str, Any]:
     """Get database connection and pool statistics."""
+    with _queue_stats_lock:
+        queue_stats_snapshot = _queue_stats.copy()
     stats: Dict[str, Any] = {
         "active_connections": 0,
         "max_connections": 0,
@@ -417,7 +433,7 @@ async def get_connection_stats() -> Dict[str, Any]:
         "pool_checked_out": 0,
         "pool_checked_in": 0,
         "queue_size": _queue.qsize() if _queue else 0,
-        "queue_stats": _queue_stats.copy(),
+        "queue_stats": queue_stats_snapshot,
     }
     
     if _engine is None:
@@ -453,9 +469,11 @@ async def get_connection_stats() -> Dict[str, Any]:
 
 async def get_queue_stats() -> Dict[str, Any]:
     """Get queue statistics."""
+    with _queue_stats_lock:
+        queue_stats_snapshot = _queue_stats.copy()
     return {
         "memory_queue_size": _queue.qsize() if _queue else 0,
-        "stats": _queue_stats.copy(),
+        "stats": queue_stats_snapshot,
     }
 
 

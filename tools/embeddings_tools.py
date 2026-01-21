@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from config import is_tool_enabled
+from logging_config import get_logger
+from tools.utils import error_response, validate_non_empty
+
+logger = get_logger("hc_ai.tools.embeddings")
 
 
 def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
@@ -42,12 +46,15 @@ def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
             """
             from embeddings import process_and_store, IngestRequest
             
-            if not content or not content.strip():
-                return {
-                    "id": id,
-                    "status": "error",
-                    "error": "Content cannot be empty",
-                }
+            error = validate_non_empty("id", id)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_non_empty("resource_type", resource_type)
+            if error:
+                return error_response("VALIDATION_ERROR", error)
+            error = validate_non_empty("content", content)
+            if error:
+                return error_response("VALIDATION_ERROR", error, {"id": id})
             
             try:
                 request = IngestRequest(
@@ -64,11 +71,8 @@ def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 return result.to_dict()
             
             except Exception as e:
-                return {
-                    "id": id,
-                    "status": "error",
-                    "error": str(e),
-                }
+                logger.error("ingest failed: %s", e)
+                return error_response("DB_ERROR", str(e), {"id": id})
     
     if is_tool_enabled(config, "embeddings_health"):
         @mcp.tool()
@@ -104,7 +108,8 @@ def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 stats = await get_connection_stats()
                 return stats
             except Exception as e:
-                return {"error": str(e)}
+                logger.error("db_stats failed: %s", e)
+                return error_response("DB_ERROR", str(e))
     
     if is_tool_enabled(config, "db_queue"):
         @mcp.tool()
@@ -120,7 +125,8 @@ def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 stats = await get_queue_stats()
                 return stats
             except Exception as e:
-                return {"error": str(e)}
+                logger.error("db_queue failed: %s", e)
+                return error_response("DB_ERROR", str(e))
     
     if is_tool_enabled(config, "db_errors"):
         @mcp.tool()
@@ -155,4 +161,5 @@ def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:
                     "count": len(errors),
                 }
             except Exception as e:
-                return {"errors": [], "error": str(e)}
+                logger.error("db_errors failed: %s", e)
+                return error_response("DB_ERROR", str(e))
