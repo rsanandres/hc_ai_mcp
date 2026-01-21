@@ -1,0 +1,10 @@
+{
+  "name": "hc-ai-mcp",
+  "description": "AI-powered FHIR document search and conversation",
+  "version": "1.0.0",
+  "author": "rsanandres",
+  "repository": "https://github.com/rsanandres/hc-ai-mcp",
+  "categories": ["healthcare", "rag", "ai-agents", "fhir"],
+  "transport": ["stdio", "streamable-http"],
+  "tools": 15
+}
