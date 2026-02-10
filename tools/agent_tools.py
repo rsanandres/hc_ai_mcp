@@ -27,74 +27,75 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
             query: str,
             session_id: str,
             patient_id: Optional[str] = None,
-            k_retrieve: int = 50,
-            k_return: int = 10,
         ) -> Dict[str, Any]:
             """Query the HC-AI agent with a natural language question.
-            
+
+            The agent uses a multi-agent workflow with query classification,
+            tool-based retrieval (hybrid search + reranking), validation,
+            and response synthesis.
+
             Args:
                 query: The natural language question to ask.
                 session_id: Session identifier for conversation context.
                 patient_id: Optional patient ID to filter results.
-                k_retrieve: Number of documents to retrieve (default: 50).
-                k_return: Number of documents to return after reranking (default: 10).
-            
+
             Returns:
                 Dictionary with response, sources, and metadata.
             """
             from agent import get_agent
             from session import get_session_store
-            
+
             error = validate_non_empty("query", query)
             if error:
                 return error_response("VALIDATION_ERROR", error)
             error = validate_non_empty("session_id", session_id)
             if error:
                 return error_response("VALIDATION_ERROR", error)
-            error = validate_k("k_retrieve", k_retrieve)
-            if error:
-                return error_response("VALIDATION_ERROR", error)
-            error = validate_k("k_return", k_return)
-            if error:
-                return error_response("VALIDATION_ERROR", error)
-            
+
             try:
                 agent = get_agent()
-                max_iterations = int(os.getenv("AGENT_MAX_ITERATIONS", "10"))
-                
+                max_iterations = int(os.getenv("AGENT_MAX_ITERATIONS", "15"))
+
                 state = {
                     "query": query,
                     "session_id": session_id,
                     "patient_id": patient_id,
-                    "k_retrieve": k_retrieve,
-                    "k_return": k_return,
                     "iteration_count": 0,
                 }
-                
-                timeout = get_timeout("AGENT_TIMEOUT", 60.0)
+
+                timeout = get_timeout("AGENT_TIMEOUT", 120.0)
                 result = await asyncio.wait_for(
                     agent.ainvoke(state, config={"recursion_limit": max_iterations}),
                     timeout=timeout,
                 )
-                
+
                 response_text = result.get("final_response") or result.get("researcher_output", "")
-                
+
                 # Store in session
-                store = get_session_store()
-                store.append_turn(session_id, role="user", text=query)
-                store.append_turn(
-                    session_id,
-                    role="assistant",
-                    text=response_text,
-                    meta={"tool_calls": result.get("tools_called", [])},
-                )
-                
+                try:
+                    store = get_session_store()
+                    store.append_turn(
+                        session_id, role="user", text=query,
+                        patient_id=patient_id,
+                    )
+                    store.append_turn(
+                        session_id,
+                        role="assistant",
+                        text=response_text,
+                        meta={"tool_calls": result.get("tools_called", [])},
+                        patient_id=patient_id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to store session turn: %s", e)
+
                 return {
                     "query": query,
                     "response": response_text,
                     "sources": result.get("sources", []),
                     "tool_calls": result.get("tools_called", []),
                     "session_id": session_id,
+                    "patient_id": patient_id,
+                    "query_type": result.get("query_type"),
                     "validation_result": result.get("validation_result"),
                     "status": "success",
                 }
@@ -102,7 +103,7 @@ def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:
                 return error_response(
                     "TIMEOUT_ERROR",
                     "Agent request timed out",
-                    {"timeout_seconds": get_timeout("AGENT_TIMEOUT", 60.0)},
+                    {"timeout_seconds": get_timeout("AGENT_TIMEOUT", 120.0)},
                 )
             except Exception as e:
                 logger.error("agent_query failed: %s", e)

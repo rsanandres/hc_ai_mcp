@@ -1,10 +1,9 @@
-"""Embedding generation using Ollama or Amazon Bedrock."""
+"""Embedding generation using Ollama, Amazon Bedrock, or Nomic API."""
 
 from __future__ import annotations
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Iterable, List, Optional
 
 import requests
@@ -17,15 +16,24 @@ from logging_config import get_logger
 logger = get_logger("hc_ai.embeddings")
 
 # Embedding provider configuration
+# Supported: "ollama" (default), "bedrock", "nomic" (fallback)
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
 
 # Ollama configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large:latest")
 OLLAMA_EMBED_BATCH_SIZE = int(os.getenv("OLLAMA_EMBED_BATCH_SIZE", "8"))
-OLLAMA_EMBED_MAX_PARALLEL = int(os.getenv("OLLAMA_EMBED_MAX_PARALLEL", "4"))
 
-# Bedrock configuration (future)
+# Nomic API configuration (fallback)
+NOMIC_API_AVAILABLE = False
+if EMBEDDING_PROVIDER == "nomic":
+    try:
+        from nomic import embed
+        NOMIC_API_AVAILABLE = True
+    except (ImportError, TypeError) as e:
+        logger.warning("Could not import nomic API: %s", e)
+
+# Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
 BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v1")
 BEDROCK_EMBED_BATCH_SIZE = int(os.getenv("BEDROCK_EMBED_BATCH_SIZE", "4"))
@@ -60,10 +68,12 @@ def get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
     
     if EMBEDDING_PROVIDER == "ollama":
         return _get_embeddings_ollama(texts)
+    elif EMBEDDING_PROVIDER == "nomic":
+        return _get_embeddings_nomic(texts)
     elif EMBEDDING_PROVIDER == "bedrock":
         return _get_embeddings_bedrock(texts)
     else:
-        logger.error(f"Unknown embedding provider: {EMBEDDING_PROVIDER}")
+        logger.error("Unknown embedding provider: %s", EMBEDDING_PROVIDER)
         return None
 
 
@@ -92,31 +102,28 @@ def _ollama_embed_single(session: requests.Session, text: str) -> List[float]:
 
 def _get_embeddings_ollama(texts: List[str]) -> Optional[List[List[float]]]:
     """Get embeddings using Ollama API.
-    
+
     Args:
         texts: List of texts to embed.
-    
+
     Returns:
         List of embedding vectors or None if failed.
     """
+    # TODO: Future improvement — re-enable ThreadPoolExecutor for parallel
+    # embedding after resolving issues with connection pool exhaustion.
     try:
         embeddings: List[List[float]] = []
         batch_size = max(1, OLLAMA_EMBED_BATCH_SIZE)
         with requests.Session() as session:
             for batch in _chunked(texts, batch_size):
-                if len(batch) == 1:
-                    embeddings.append(_ollama_embed_single(session, batch[0]))
-                    continue
-                max_workers = min(OLLAMA_EMBED_MAX_PARALLEL, len(batch))
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    results = list(executor.map(lambda text: _ollama_embed_single(session, text), batch))
-                    embeddings.extend(results)
+                for text in batch:
+                    embeddings.append(_ollama_embed_single(session, text))
         return embeddings
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling Ollama API: {e}")
+        logger.error("Error calling Ollama API: %s", e)
         return None
     except Exception as e:
-        logger.error(f"Ollama embedding error: {e}")
+        logger.error("Ollama embedding error: %s", e)
         return None
 
 
@@ -157,6 +164,23 @@ def _get_embeddings_bedrock(texts: List[str]) -> Optional[List[List[float]]]:
         return None
     except Exception as e:
         logger.error(f"Error calling Bedrock API: {e}")
+        return None
+
+
+def _get_embeddings_nomic(texts: List[str]) -> Optional[List[List[float]]]:
+    """Get embeddings using Nomic API (fallback provider)."""
+    if not NOMIC_API_AVAILABLE:
+        logger.error("Nomic API not available. Install with: pip install nomic")
+        return None
+    try:
+        output = embed.text(
+            texts=texts,
+            model="nomic-embed-text-v1.5",
+            task_type="search_document",
+        )
+        return output["embeddings"] if output.get("embeddings") else None
+    except Exception as e:
+        logger.error("Error calling Nomic API: %s", e)
         return None
 
 
@@ -232,7 +256,26 @@ def test_connection() -> Dict[str, Any]:
         except Exception as e:
             result["errors"].append(f"bedrock_error: {e}")
     
+    elif EMBEDDING_PROVIDER == "nomic":
+        result["model"] = "nomic-embed-text-v1.5"
+        if not NOMIC_API_AVAILABLE:
+            result["errors"].append("nomic package not installed")
+        else:
+            try:
+                output = embed.text(
+                    texts=["test"],
+                    model="nomic-embed-text-v1.5",
+                    task_type="search_document",
+                )
+                if output.get("embeddings"):
+                    result["embed_dimensions"] = len(output["embeddings"][0])
+                    result["ok"] = True
+                else:
+                    result["errors"].append("embed_error: no embeddings returned")
+            except Exception as e:
+                result["errors"].append(f"nomic_error: {e}")
+
     else:
         result["errors"].append(f"Unknown provider: {EMBEDDING_PROVIDER}")
-    
+
     return result

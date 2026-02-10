@@ -106,38 +106,19 @@ class Reranker:
         docs: List[Any],
     ) -> List[Tuple[Any, float]]:
         """Rerank documents and return with scores.
-        
+
         Args:
             query: The query string.
             docs: List of Document objects with page_content attribute.
-        
+
         Returns:
             List of (document, score) tuples sorted by relevance.
         """
+        # TODO: Future improvement — re-enable integrated caching after resolving issues
         if not docs:
             return []
         contents = [doc.page_content for doc in docs]
-        doc_ids: List[str] = []
-        for idx, doc in enumerate(docs):
-            doc_id = getattr(doc, "id", None)
-            if not doc_id:
-                meta = getattr(doc, "metadata", {}) or {}
-                doc_id = meta.get("chunkId") or meta.get("resourceId") or f"doc_{idx}"
-            doc_ids.append(str(doc_id))
-
-        scores: List[float] = []
-        cache = get_cache()
-        cache_key = build_cache_key(query, doc_ids)
-        cached = cache.get(cache_key)
-        if cached:
-            cached_map = {doc_id: score for doc_id, score in cached}
-            if all(doc_id in cached_map for doc_id in doc_ids):
-                scores = [float(cached_map[doc_id]) for doc_id in doc_ids]
-                logger.debug("Reranker cache hit for %s docs", len(doc_ids))
-
-        if not scores:
-            scores = self.score(query, contents)
-            cache.set(cache_key, list(zip(doc_ids, scores)))
+        scores = self.score(query, contents)
         scored_docs = [(idx, doc, score) for idx, (doc, score) in enumerate(zip(docs, scores))]
         scored_docs.sort(key=lambda item: (-item[2], item[0]))
         return [(doc, score) for _idx, doc, score in scored_docs]

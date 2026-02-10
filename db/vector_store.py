@@ -503,6 +503,148 @@ async def get_error_logs(
     return logs[offset:offset + limit]
 
 
+async def _search_similar_with_sql_filter(
+    query: str,
+    k: int = 10,
+    filter_metadata: Optional[Dict[str, Any]] = None,
+) -> List[Document]:
+    """Search using SQL-level patient filtering for better performance."""
+    try:
+        vector_store = await initialize_vector_store()
+        results = await vector_store.asimilarity_search(
+            query=query,
+            k=k,
+            filter=filter_metadata,
+        )
+        return results
+    except Exception as e:
+        logger.error("SQL-filtered search error: %s", e)
+        raise
+
+
+async def hybrid_search(
+    query: str,
+    k: int = 50,
+    filter_metadata: Optional[Dict[str, Any]] = None,
+    bm25_weight: float = 0.5,
+    semantic_weight: float = 0.5,
+) -> List[Document]:
+    """
+    Perform hybrid BM25 + semantic search with reciprocal rank fusion.
+
+    Args:
+        query: Search query text.
+        k: Number of results to return.
+        filter_metadata: Optional metadata filters.
+        bm25_weight: Weight for BM25 results (0.0-1.0).
+        semantic_weight: Weight for semantic results (0.0-1.0).
+
+    Returns:
+        List of Document objects sorted by fused relevance score.
+    """
+    from db.bm25_search import bm25_search
+
+    # Run both searches
+    try:
+        semantic_results = await search_similar_chunks(query, k=k, filter_metadata=filter_metadata)
+    except Exception as e:
+        logger.error("Semantic search failed in hybrid: %s", e)
+        semantic_results = []
+
+    try:
+        bm25_results = await bm25_search(query, k=k, filter_metadata=filter_metadata, engine=_engine)
+    except Exception as e:
+        logger.error("BM25 search failed in hybrid: %s", e)
+        bm25_results = []
+
+    if not semantic_results and not bm25_results:
+        return []
+
+    if not bm25_results:
+        return semantic_results[:k]
+    if not semantic_results:
+        return bm25_results[:k]
+
+    # Reciprocal Rank Fusion
+    rrf_constant = 60
+    scores: Dict[str, float] = {}
+    doc_map: Dict[str, Document] = {}
+
+    for rank, doc in enumerate(semantic_results):
+        doc_id = str(getattr(doc, "id", "")) or doc.page_content[:100]
+        scores[doc_id] = scores.get(doc_id, 0.0) + semantic_weight / (rrf_constant + rank + 1)
+        doc_map[doc_id] = doc
+
+    for rank, doc in enumerate(bm25_results):
+        doc_id = str(getattr(doc, "id", "")) or doc.page_content[:100]
+        scores[doc_id] = scores.get(doc_id, 0.0) + bm25_weight / (rrf_constant + rank + 1)
+        if doc_id not in doc_map:
+            doc_map[doc_id] = doc
+
+    sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)
+    return [doc_map[doc_id] for doc_id in sorted_ids[:k]]
+
+
+async def get_patient_timeline(
+    patient_id: str,
+    k: int = 50,
+) -> List[Document]:
+    """
+    Get chronological patient data sorted by date.
+
+    Args:
+        patient_id: Patient UUID to filter by.
+        k: Number of results to return.
+
+    Returns:
+        List of Document objects sorted chronologically.
+    """
+    from sqlalchemy import text as sql_text
+
+    if _engine is None:
+        await initialize_vector_store()
+
+    if not _engine:
+        return []
+
+    base_sql = f"""
+        SELECT
+            langchain_id,
+            content,
+            langchain_metadata
+        FROM "{SCHEMA_NAME}"."{TABLE_NAME}"
+        WHERE langchain_metadata->>'patient_id' = :patient_id
+        ORDER BY langchain_metadata->>'date' ASC NULLS LAST
+        LIMIT :k
+    """
+
+    try:
+        async with _engine.begin() as conn:
+            result = await conn.execute(sql_text(base_sql), {"patient_id": patient_id, "k": k})
+            rows = result.fetchall()
+
+            documents = []
+            for row in rows:
+                if hasattr(row, '_mapping'):
+                    langchain_id = row._mapping['langchain_id']
+                    content = row._mapping['content']
+                    metadata = row._mapping['langchain_metadata'] or {}
+                else:
+                    langchain_id, content, metadata = row
+
+                doc = Document(
+                    id=str(langchain_id),
+                    page_content=content or "",
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                )
+                documents.append(doc)
+
+            return documents
+    except Exception as e:
+        logger.error("Patient timeline error: %s", e)
+        return []
+
+
 async def close_connections():
     """Close database connections and cleanup."""
     global _engine, _vector_store, _queue_worker_task
