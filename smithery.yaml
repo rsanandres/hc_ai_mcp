@@ -1,0 +1,54 @@
+# Smithery.ai configuration for hc-ai-mcp
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      DB_HOST:
+        type: string
+        default: "localhost"
+        description: "PostgreSQL host"
+      DB_PORT:
+        type: string
+        default: "5432"
+        description: "PostgreSQL port"
+      DB_NAME:
+        type: string
+        default: "hc_ai"
+        description: "Database name"
+      DB_PASSWORD:
+        type: string
+        description: "Database password"
+      EMBEDDING_PROVIDER:
+        type: string
+        default: "ollama"
+        description: "Embedding provider: ollama, bedrock, or nomic"
+      LLM_PROVIDER:
+        type: string
+        default: "ollama"
+        description: "LLM provider: ollama, openai, anthropic, or bedrock"
+      LLM_MODEL:
+        type: string
+        default: "llama3"
+        description: "LLM model name"
+      OLLAMA_BASE_URL:
+        type: string
+        default: "http://localhost:11434"
+        description: "Ollama API URL"
+    required:
+      - DB_PASSWORD
+  commandFunction: |
+    (config) => ({
+      command: "python",
+      args: ["server.py"],
+      env: {
+        DB_HOST: config.DB_HOST || "localhost",
+        DB_PORT: config.DB_PORT || "5432",
+        DB_NAME: config.DB_NAME || "hc_ai",
+        DB_PASSWORD: config.DB_PASSWORD,
+        EMBEDDING_PROVIDER: config.EMBEDDING_PROVIDER || "ollama",
+        LLM_PROVIDER: config.LLM_PROVIDER || "ollama",
+        LLM_MODEL: config.LLM_MODEL || "llama3",
+        OLLAMA_BASE_URL: config.OLLAMA_BASE_URL || "http://localhost:11434",
+      }
+    })

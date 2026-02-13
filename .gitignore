@@ -76,5 +76,10 @@ temp/
 *.tmp
 *.bak
 
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
 # Data (FHIR patient bundles - not committed)
 data/

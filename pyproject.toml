@@ -8,8 +8,21 @@ version = "1.0.0"
 description = "AI-powered MCP server for FHIR document search and conversation"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {file = "LICENSE"}
-authors = [{name = "rsanandres", url = "https://github.com/rsanandres"}]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "rsanandres"}]
+keywords = ["mcp", "fhir", "healthcare", "ai", "rag", "clinical", "embeddings", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Healthcare Industry",
+
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 
 dependencies = [
   "mcp>=1.0.0",
@@ -37,8 +50,28 @@ dependencies = [
   "httpx>=0.27.0",
   "boto3>=1.34.0",
   "guardrails-ai>=0.4.0",
-  "pydeid"
+  "pydeid",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rsanandres/hc_ai_mcp"
+Repository = "https://github.com/rsanandres/hc_ai_mcp"
+Issues = "https://github.com/rsanandres/hc_ai_mcp/issues"
 
 [project.scripts]
 hc-ai-mcp = "server:main"
+
+[tool.setuptools.packages.find]
+include = [
+  "agent*",
+  "config*",
+  "db*",
+  "embeddings*",
+  "reranker*",
+  "session*",
+  "tools*",
+]
+exclude = ["tests*"]
+
+[tool.setuptools]
+py-modules = ["server", "logging_config"]
