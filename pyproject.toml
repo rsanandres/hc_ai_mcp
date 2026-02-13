@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hc-ai-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "AI-powered MCP server for FHIR document search and conversation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -75,3 +75,4 @@ exclude = ["tests*"]
 
 [tool.setuptools]
 py-modules = ["server", "logging_config"]
+
