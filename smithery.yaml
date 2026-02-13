@@ -16,17 +16,24 @@ startCommand:
         type: string
         default: "hc_ai"
         description: "Database name"
+      DB_USER:
+        type: string
+        default: "postgres"
+        description: "Database user"
       DB_PASSWORD:
         type: string
+        default: ""
         description: "Database password"
       EMBEDDING_PROVIDER:
         type: string
         default: "ollama"
         description: "Embedding provider: ollama, bedrock, or nomic"
+        enum: ["ollama", "bedrock", "nomic"]
       LLM_PROVIDER:
         type: string
         default: "ollama"
         description: "LLM provider: ollama, openai, anthropic, or bedrock"
+        enum: ["ollama", "openai", "anthropic", "bedrock"]
       LLM_MODEL:
         type: string
         default: "llama3"
@@ -35,8 +42,19 @@ startCommand:
         type: string
         default: "http://localhost:11434"
         description: "Ollama API URL"
-    required:
-      - DB_PASSWORD
+      OPENAI_API_KEY:
+        type: string
+        default: ""
+        description: "OpenAI API key (required if LLM_PROVIDER=openai)"
+      ANTHROPIC_API_KEY:
+        type: string
+        default: ""
+        description: "Anthropic API key (required if LLM_PROVIDER=anthropic)"
+      SESSION_PROVIDER:
+        type: string
+        default: "memory"
+        description: "Session backend: memory or dynamodb"
+        enum: ["memory", "dynamodb"]
   commandFunction: |
     (config) => ({
       command: "python",
@@ -45,10 +63,14 @@ startCommand:
         DB_HOST: config.DB_HOST || "localhost",
         DB_PORT: config.DB_PORT || "5432",
         DB_NAME: config.DB_NAME || "hc_ai",
-        DB_PASSWORD: config.DB_PASSWORD,
+        DB_USER: config.DB_USER || "postgres",
+        DB_PASSWORD: config.DB_PASSWORD || "",
         EMBEDDING_PROVIDER: config.EMBEDDING_PROVIDER || "ollama",
         LLM_PROVIDER: config.LLM_PROVIDER || "ollama",
         LLM_MODEL: config.LLM_MODEL || "llama3",
         OLLAMA_BASE_URL: config.OLLAMA_BASE_URL || "http://localhost:11434",
+        OPENAI_API_KEY: config.OPENAI_API_KEY || "",
+        ANTHROPIC_API_KEY: config.ANTHROPIC_API_KEY || "",
+        SESSION_PROVIDER: config.SESSION_PROVIDER || "memory",
       }
     })
