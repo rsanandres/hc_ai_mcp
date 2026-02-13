@@ -1,4 +1,7 @@
 # Smithery.ai configuration for hc-ai-mcp
+build:
+  dockerBuildPath: ./
+
 startCommand:
   type: stdio
   configSchema:
