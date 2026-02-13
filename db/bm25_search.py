@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 from langchain_core.documents import Document
 
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.bm25")
+
 
 # Schema and table configuration
 SCHEMA_NAME = os.getenv("DB_SCHEMA_NAME", "public")
@@ -128,7 +132,7 @@ async def bm25_search(
             return documents
 
     except Exception as e:
-        print(f"BM25 search error: {e}")
+        logger.error("BM25 search error: %s", e)
         return []
 
 
@@ -216,5 +220,5 @@ async def bm25_search_with_phrase(
             return documents
 
     except Exception as e:
-        print(f"BM25 phrase search error: {e}")
+        logger.error("BM25 phrase search error: %s", e)
         return []

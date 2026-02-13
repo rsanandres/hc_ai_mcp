@@ -10,6 +10,9 @@ from langchain_core.tools import tool
 
 from agent.tools.schemas import ChunkResult, RetrievalResponse
 from agent.tools.context import get_patient_context
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.retrieval")
 
 
 def strip_patient_name_from_query(query: str, patient_id: Optional[str] = None) -> str:
@@ -136,10 +139,10 @@ async def search_patient_records(
     context_patient_id = get_patient_context()
     if context_patient_id:
         if patient_id and patient_id != context_patient_id:
-            print(f"[RETRIEVAL] Overriding LLM patient_id ({patient_id[:8]}...) with context ({context_patient_id[:8]}...)")
+            logger.info("Overriding LLM patient_id (%s...) with context (%s...)", patient_id[:8], context_patient_id[:8])
         patient_id = context_patient_id
     elif not patient_id:
-        print("[RETRIEVAL] Warning: No patient_id provided and none in context")
+        logger.warning("No patient_id provided and none in context")
 
     original_query = query
 
@@ -244,10 +247,10 @@ async def retrieve_patient_data(
     context_patient_id = get_patient_context()
     if context_patient_id:
         if patient_id and patient_id != context_patient_id:
-            print(f"[RETRIEVAL] Overriding LLM patient_id ({patient_id[:8]}...) with context ({context_patient_id[:8]}...)")
+            logger.info("Overriding LLM patient_id (%s...) with context (%s...)", patient_id[:8], context_patient_id[:8])
         patient_id = context_patient_id
     elif not patient_id:
-        print("[RETRIEVAL] Warning: No patient_id provided and none in context")
+        logger.warning("No patient_id provided and none in context")
 
     original_query = query
 

@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
 
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.tools")
+
 from agent.pii_masker.factory import create_pii_masker
 from session.store import get_session_store
 from agent.tools.schemas import (
@@ -48,10 +52,10 @@ async def search_clinical_notes(
     context_patient_id = get_patient_context()
     if context_patient_id:
         if patient_id and patient_id != context_patient_id:
-            print(f"[CLINICAL_NOTES] Overriding patient_id ({patient_id[:8]}...) with context ({context_patient_id[:8]}...)")
+            logger.info("Overriding patient_id (%s...) with context (%s...)", patient_id[:8], context_patient_id[:8])
         patient_id = context_patient_id
     elif not patient_id:
-        print("[CLINICAL_NOTES] Warning: No patient_id provided and none in context")
+        logger.warning("No patient_id provided and none in context")
 
     # Auto-detect resource type from query keywords
     detected_resource_type = detect_resource_type_from_query(query)
@@ -71,7 +75,7 @@ async def search_clinical_notes(
         filter_metadata["patient_id"] = patient_id
     if detected_resource_type:
         filter_metadata["resource_type"] = detected_resource_type
-        print(f"[CLINICAL_NOTES] Auto-detected resource_type: {detected_resource_type}")
+        logger.debug("Auto-detected resource_type: %s", detected_resource_type)
 
     # Hybrid search (BM25 + semantic)
     docs = await hybrid_search(
@@ -88,7 +92,7 @@ async def search_clinical_notes(
             reranked = reranker.rerank_with_scores(query, docs)
             scored_docs = [(doc, score) for doc, score in reranked[:10]]
         except Exception as e:
-            print(f"[CLINICAL_NOTES] Reranking failed, using raw results: {e}")
+            logger.warning("Reranking failed, using raw results: %s", e)
             scored_docs = [(doc, 0.0) for doc in docs[:10]]
 
     chunks = [
@@ -125,7 +129,7 @@ async def get_patient_timeline(patient_id: Optional[str] = None, k_return: int =
     context_patient_id = get_patient_context()
     if context_patient_id:
         if patient_id and patient_id != context_patient_id:
-            print(f"[TIMELINE] Overriding patient_id ({patient_id[:8]}...) with context ({context_patient_id[:8]}...)")
+            logger.info("Timeline: overriding patient_id (%s...) with context (%s...)", patient_id[:8], context_patient_id[:8])
         patient_id = context_patient_id
     elif not patient_id:
         return TimelineResponse(

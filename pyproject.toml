@@ -34,7 +34,10 @@ dependencies = [
   "numpy>=1.24.0",
   "scikit-learn>=1.3.0",
   "requests>=2.31.0",
-  "boto3>=1.34.0"
+  "httpx>=0.27.0",
+  "boto3>=1.34.0",
+  "guardrails-ai>=0.4.0",
+  "pydeid"
 ]
 
 [project.scripts]

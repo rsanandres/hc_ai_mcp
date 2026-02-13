@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from logging_config import get_logger
+
+logger = get_logger("hc_ai.session")
+
 load_dotenv()
 
 try:
@@ -243,9 +247,9 @@ class SessionStore:
                     waiter.wait(TableName=table_name)
                 except ClientError as e:
                     # Index might already exist or creation failed - log but don't fail
-                    print(f"Note: Could not create GSI (may already exist): {e}")
+                    logger.info("Could not create GSI (may already exist): %s", e)
         except ClientError as e:
-            print(f"Note: Could not check/create GSI: {e}")
+            logger.info("Could not check/create GSI: %s", e)
 
     # ------------------------ operations ------------------------ #
 
@@ -486,7 +490,7 @@ class SessionStore:
                             )
                             migrated += 1
         except ClientError as e:
-            print(f"Error migrating sessions: {e}")
+            logger.error("Error migrating sessions: %s", e)
 
         return migrated
 
@@ -522,13 +526,13 @@ def _warn_on_bad_endpoint(endpoint: str) -> None:
         try:
             resp = requests.get("http://localhost:8000/agent/health", timeout=2)
             if resp.status_code == 200:
-                print(
-                    "Warning: DDB_ENDPOINT points to FastAPI on port 8000. "
+                logger.warning(
+                    "DDB_ENDPOINT points to FastAPI on port 8000. "
                     "DynamoDB Local should run on port 8001."
                 )
         except requests.RequestException:
-            print(
-                "Warning: DDB_ENDPOINT appears to use port 8000. "
+            logger.warning(
+                "DDB_ENDPOINT appears to use port 8000. "
                 "If this is DynamoDB Local, update to http://localhost:8001."
             )
 
