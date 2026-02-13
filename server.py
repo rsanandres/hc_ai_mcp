@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -132,7 +133,31 @@ Examples:
         # For streamable-http, we need to run the ASGI app directly
         try:
             import uvicorn
-            app = mcp.streamable_http_app()
+            from starlette.routing import Route
+            from starlette.responses import JSONResponse
+
+            mcp_app = mcp.streamable_http_app()
+
+            # Load server card for .well-known discovery
+            card_path = package_dir / "server_card.json"
+            if card_path.exists():
+                with open(card_path) as f:
+                    server_card = json.load(f)
+            else:
+                server_card = {"error": "server_card.json not found"}
+
+            async def well_known_server_card(request):
+                return JSONResponse(server_card)
+
+            # Mount well-known route alongside the MCP app
+            from starlette.applications import Starlette
+            from starlette.routing import Mount
+
+            app = Starlette(routes=[
+                Route("/.well-known/mcp/server-card.json", well_known_server_card),
+                Mount("/", app=mcp_app),
+            ])
+
             uvicorn.run(app, host=args.host, port=args.port)
         except ImportError:
             logger.error("Error: uvicorn is required for HTTP transport. Run: pip install uvicorn")
