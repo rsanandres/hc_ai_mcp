@@ -147,7 +147,7 @@ def validate_env() -> List[str]:
 
     db_password = os.getenv("DB_PASSWORD")
     if not db_password:
-        errors.append("DB_PASSWORD is required")
+        logger.warning("DB_PASSWORD not set — database tools will fail until configured")
 
     llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
     if llm_provider == "openai" and not os.getenv("OPENAI_API_KEY"):
