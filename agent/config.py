@@ -75,6 +75,7 @@ def get_llm() -> Any:
 
     if provider == "bedrock":
         from langchain_aws import ChatBedrock
+        from botocore.config import Config as BotoConfig
 
         model_name = os.getenv("LLM_MODEL", "haiku").lower()
         # Friendly name mapping
@@ -85,8 +86,15 @@ def get_llm() -> Any:
         }
         model_id = model_map.get(model_name, model_name)
 
+        boto_config = BotoConfig(
+            read_timeout=_int_env("BEDROCK_READ_TIMEOUT", 60),
+            connect_timeout=_int_env("BEDROCK_CONNECT_TIMEOUT", 10),
+            retries={"max_attempts": _int_env("BEDROCK_MAX_RETRIES", 2)},
+        )
+
         return ChatBedrock(
             model_id=model_id,
+            config=boto_config,
             model_kwargs={
                 "temperature": temperature,
                 "max_tokens": max_tokens,

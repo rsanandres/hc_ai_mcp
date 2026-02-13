@@ -161,6 +161,29 @@ async def initialize_vector_store():
     # Create engine if not exists
     if _engine is None:
         connection_string = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+        # SSL configuration for remote databases (e.g., AWS RDS)
+        connect_args: Dict[str, Any] = {}
+        ssl_enabled = os.getenv("DB_SSL_ENABLED", "auto").lower()
+        is_remote = DB_HOST not in ("localhost", "127.0.0.1")
+
+        if ssl_enabled == "true" or (ssl_enabled == "auto" and is_remote):
+            import ssl as _ssl
+            ssl_cert = os.getenv("DB_SSL_CERT", "")
+            pkg_dir = os.path.dirname(os.path.dirname(__file__))
+            rds_ca_path = os.path.join(pkg_dir, "rds-combined-ca-bundle.pem")
+
+            if ssl_cert and os.path.exists(ssl_cert):
+                ssl_ctx = _ssl.create_default_context(cafile=ssl_cert)
+            elif os.path.exists(rds_ca_path):
+                ssl_ctx = _ssl.create_default_context(cafile=rds_ca_path)
+            elif os.path.exists("/app/rds-combined-ca-bundle.pem"):
+                ssl_ctx = _ssl.create_default_context(cafile="/app/rds-combined-ca-bundle.pem")
+            else:
+                ssl_ctx = _ssl.create_default_context()
+            connect_args["ssl"] = ssl_ctx
+            logger.info("SSL enabled for database connection to %s", DB_HOST)
+
         _engine = create_async_engine(
             connection_string,
             pool_size=MAX_POOL_SIZE,
@@ -168,7 +191,20 @@ async def initialize_vector_store():
             pool_timeout=POOL_TIMEOUT,
             pool_pre_ping=True,
             echo=False,
+            connect_args=connect_args,
         )
+
+        # Set IVFFlat probes on every new connection for optimal index recall
+        ivfflat_probes = int(os.getenv("DB_IVFFLAT_PROBES", "0"))
+        if ivfflat_probes > 0:
+            from sqlalchemy import event
+            @event.listens_for(_engine.sync_engine, "connect")
+            def _set_ivfflat_probes(dbapi_conn, connection_record):
+                cursor = dbapi_conn.cursor()
+                cursor.execute(f"SET ivfflat.probes = {ivfflat_probes}")
+                cursor.close()
+            logger.info("IVFFlat probes set to %d on new connections", ivfflat_probes)
+
         _pg_engine = PGEngine.from_engine(engine=_engine)
     
     # Create schema if it doesn't exist
@@ -588,6 +624,7 @@ async def hybrid_search(
 async def get_patient_timeline(
     patient_id: str,
     k: int = 50,
+    resource_types: Optional[List[str]] = None,
 ) -> List[Document]:
     """
     Get chronological patient data sorted by date.
@@ -595,6 +632,7 @@ async def get_patient_timeline(
     Args:
         patient_id: Patient UUID to filter by.
         k: Number of results to return.
+        resource_types: Optional filter for specific FHIR resource types.
 
     Returns:
         List of Document objects sorted chronologically.
@@ -607,6 +645,8 @@ async def get_patient_timeline(
     if not _engine:
         return []
 
+    params: Dict[str, Any] = {"patient_id": patient_id, "k": k}
+
     base_sql = f"""
         SELECT
             langchain_id,
@@ -614,13 +654,20 @@ async def get_patient_timeline(
             langchain_metadata
         FROM "{SCHEMA_NAME}"."{TABLE_NAME}"
         WHERE langchain_metadata->>'patient_id' = :patient_id
-        ORDER BY langchain_metadata->>'date' ASC NULLS LAST
+    """
+
+    if resource_types:
+        base_sql += " AND langchain_metadata->>'resource_type' = ANY(:resource_types)"
+        params["resource_types"] = resource_types
+
+    base_sql += """
+        ORDER BY langchain_metadata->>'effective_date' ASC NULLS LAST
         LIMIT :k
     """
 
     try:
         async with _engine.begin() as conn:
-            result = await conn.execute(sql_text(base_sql), {"patient_id": patient_id, "k": k})
+            result = await conn.execute(sql_text(base_sql), params)
             rows = result.fetchall()
 
             documents = []
@@ -642,6 +689,89 @@ async def get_patient_timeline(
             return documents
     except Exception as e:
         logger.error("Patient timeline error: %s", e)
+        return []
+
+
+async def list_patients(limit: int = 100) -> List[Dict[str, Any]]:
+    """List all unique patients in the vector store with summary info.
+
+    Returns a list of patient objects with:
+    - id: patient UUID
+    - name: extracted from source_file metadata (format: LastName_FirstName_N.json)
+    - chunk_count: number of chunks for this patient
+    - resource_types: list of FHIR resource types for this patient
+
+    Args:
+        limit: Maximum number of patients to return.
+
+    Returns:
+        List of patient summary dictionaries.
+    """
+    from sqlalchemy import text as sql_text
+
+    if _engine is None:
+        await initialize_vector_store()
+
+    if not _engine:
+        return []
+
+    try:
+        async with _engine.begin() as conn:
+            result = await conn.execute(sql_text(f"""
+                SELECT
+                    langchain_metadata->>'patient_id' as patient_id,
+                    COUNT(*) as chunk_count,
+                    MIN(langchain_metadata->>'source_file') as source_file
+                FROM "{SCHEMA_NAME}"."{TABLE_NAME}"
+                WHERE langchain_metadata->>'patient_id' IS NOT NULL
+                GROUP BY langchain_metadata->>'patient_id'
+                ORDER BY chunk_count DESC
+                LIMIT :limit
+            """), {"limit": limit})
+            patient_rows = result.fetchall()
+
+            if not patient_rows:
+                return []
+
+            patient_ids = [row[0] for row in patient_rows]
+            result = await conn.execute(sql_text(f"""
+                SELECT
+                    langchain_metadata->>'patient_id' as patient_id,
+                    array_agg(DISTINCT langchain_metadata->>'resource_type') as resource_types
+                FROM "{SCHEMA_NAME}"."{TABLE_NAME}"
+                WHERE langchain_metadata->>'patient_id' = ANY(:patient_ids)
+                GROUP BY langchain_metadata->>'patient_id'
+            """), {"patient_ids": patient_ids})
+            resource_type_rows = {row[0]: row[1] for row in result.fetchall()}
+
+        patients = []
+        for patient_id, chunk_count, source_file in patient_rows:
+            resource_types = resource_type_rows.get(patient_id, [])
+            resource_types = [rt for rt in (resource_types or []) if rt]
+
+            name = "Unknown Patient"
+            if source_file:
+                try:
+                    filename = source_file.split("/")[-1].replace(".json", "")
+                    parts = filename.split("_")
+                    if len(parts) >= 2:
+                        last_name = ''.join(c for c in parts[0] if not c.isdigit())
+                        first_name = ''.join(c for c in parts[1] if not c.isdigit())
+                        if first_name and last_name:
+                            name = f"{first_name} {last_name}"
+                except Exception:
+                    pass
+
+            patients.append({
+                "id": patient_id,
+                "name": name,
+                "chunk_count": chunk_count,
+                "resource_types": resource_types,
+            })
+
+        return patients
+    except Exception as e:
+        logger.error("Error listing patients: %s", e)
         return []
 
 

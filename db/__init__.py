@@ -8,6 +8,7 @@ from .vector_store import (
     close_connections,
     get_connection_stats,
     get_queue_stats,
+    list_patients,
 )
 from .models import DocumentChunk, ChunkMetadata
 
@@ -19,6 +20,7 @@ __all__ = [
     "close_connections",
     "get_connection_stats",
     "get_queue_stats",
+    "list_patients",
     "DocumentChunk",
     "ChunkMetadata",
 ]

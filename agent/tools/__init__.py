@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -81,37 +80,31 @@ async def search_clinical_notes(
         filter_metadata=filter_metadata if filter_metadata else None,
     )
 
-    # Rerank results
+    # Rerank results and preserve scores
+    scored_docs = []
     if docs:
         try:
             reranker = Reranker()
             reranked = reranker.rerank_with_scores(query, docs)
-            docs = [doc for doc, _ in reranked[:10]]
+            scored_docs = [(doc, score) for doc, score in reranked[:10]]
         except Exception as e:
             print(f"[CLINICAL_NOTES] Reranking failed, using raw results: {e}")
-            docs = docs[:10]
+            scored_docs = [(doc, 0.0) for doc in docs[:10]]
 
-    # Mask PII in results
-    results = []
-    for doc in docs:
-        results.append({
-            "id": str(getattr(doc, "id", "")),
-            "content": _mask_content(doc.page_content),
-            "metadata": doc.metadata or {},
-        })
+    chunks = [
+        ChunkResult(
+            id=str(getattr(doc, "id", "")),
+            content=_mask_content(doc.page_content),
+            score=score,
+            metadata=doc.metadata or {},
+        )
+        for doc, score in scored_docs
+    ]
 
     return RetrievalResponse(
         query=query,
-        chunks=[
-            ChunkResult(
-                id=str(item.get("id", "")),
-                content=str(item.get("content", "")),
-                score=0.0,
-                metadata=item.get("metadata", {}) or {},
-            )
-            for item in results
-        ],
-        count=len(results),
+        chunks=chunks,
+        count=len(chunks),
     ).model_dump()
 
 

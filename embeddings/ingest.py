@@ -67,14 +67,14 @@ def _extract_resource_metadata(resource_json: str) -> Dict[str, Any]:
         ]
         for field_name in date_fields:
             if field_name in resource:
-                metadata["effectiveDate"] = resource[field_name]
+                metadata["effective_date"] = resource[field_name]
                 break
         
         # Check effectivePeriod
-        if "effectiveDate" not in metadata and "effectivePeriod" in resource:
+        if "effective_date" not in metadata and "effectivePeriod" in resource:
             period = resource["effectivePeriod"]
             if isinstance(period, dict) and "start" in period:
-                metadata["effectiveDate"] = period["start"]
+                metadata["effective_date"] = period["start"]
         
         # Extract status
         if "status" in resource:
@@ -85,7 +85,7 @@ def _extract_resource_metadata(resource_json: str) -> Dict[str, Any]:
         # Extract lastUpdated from meta
         if "meta" in resource and isinstance(resource["meta"], dict):
             if "lastUpdated" in resource["meta"]:
-                metadata["lastUpdated"] = resource["meta"]["lastUpdated"]
+                metadata["last_updated"] = resource["meta"]["lastUpdated"]
     
     except Exception as e:
         logger.debug(f"Could not extract metadata from JSON: {e}")
@@ -147,18 +147,18 @@ async def process_and_store(request: IngestRequest) -> IngestResult:
                 result.errors.append(f"Empty chunk: {chunk.get('chunk_id', 'unknown')}")
                 continue
             
-            # Build metadata
+            # Build metadata (snake_case keys to match query filters and indexes)
             metadata = {
-                "patientId": request.patient_id,
-                "resourceId": request.id,
-                "resourceType": request.resource_type,
-                "fullUrl": request.full_url,
-                "sourceFile": request.source_file,
-                "chunkId": f"{request.id}_{chunk.get('chunk_id', chunk_id)}",
-                "chunkIndex": chunk.get("chunk_index", 0),
-                "totalChunks": total_chunks,
-                "chunkSize": chunk.get("chunk_size", len(chunk_text)),
-                "chunkingMethod": chunking_method,
+                "patient_id": request.patient_id,
+                "resource_id": request.id,
+                "resource_type": request.resource_type,
+                "full_url": request.full_url,
+                "source_file": request.source_file,
+                "chunk_id": f"{request.id}_{chunk.get('chunk_id', chunk_id)}",
+                "chunk_index": chunk.get("chunk_index", 0),
+                "total_chunks": total_chunks,
+                "chunk_size": chunk.get("chunk_size", len(chunk_text)),
+                "chunking_method": chunking_method,
             }
             
             # Add extracted metadata

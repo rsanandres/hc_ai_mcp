@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
 from typing import Any, Dict, Optional
 
 from langchain_core.tools import tool
@@ -121,7 +120,6 @@ async def search_patient_records(
     query: str,
     patient_id: Optional[str] = None,
     k_chunks: int = 10,
-    include_full_json: bool = False,
 ) -> Dict[str, Any]:
     """
     Search patient records using hybrid search (BM25 + semantic) with reranking.
@@ -130,7 +128,6 @@ async def search_patient_records(
         query: Search query string
         patient_id: Patient UUID (NOT an ICD-10 code!) - use the patient_id from context
         k_chunks: Number of chunks to return (default: 10)
-        include_full_json: Whether to include full document JSON
     """
     from agent.tools.argument_validators import validate_patient_id
     from db.vector_store import hybrid_search, search_similar_chunks

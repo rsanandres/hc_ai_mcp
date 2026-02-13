@@ -40,12 +40,12 @@ ON public.hc_ai_chunks
 USING gin (metadata);
 
 -- Create index for patient_id lookups (common filter)
-CREATE INDEX IF NOT EXISTS hc_ai_chunks_patient_id_idx 
-ON public.hc_ai_chunks ((metadata->>'patientId'));
+CREATE INDEX IF NOT EXISTS hc_ai_chunks_patient_id_idx
+ON public.hc_ai_chunks ((metadata->>'patient_id'));
 
 -- Create index for resource_type lookups
-CREATE INDEX IF NOT EXISTS hc_ai_chunks_resource_type_idx 
-ON public.hc_ai_chunks ((metadata->>'resourceType'));
+CREATE INDEX IF NOT EXISTS hc_ai_chunks_resource_type_idx
+ON public.hc_ai_chunks ((metadata->>'resource_type'));
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

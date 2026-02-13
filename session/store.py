@@ -533,16 +533,94 @@ def _warn_on_bad_endpoint(endpoint: str) -> None:
             )
 
 
-# Global singleton session store instance
-_SESSION_STORE: Optional[SessionStore] = None
+class InMemorySessionStore:
+    """Simple in-memory session store for local usage without DynamoDB.
 
-
-def build_store_from_env() -> SessionStore:
-    """Factory that builds a SessionStore using environment variables.
-
-    Note: For better performance and to avoid connection pool exhaustion,
-    use get_session_store() instead, which returns a singleton instance.
+    API-compatible with SessionStore (DynamoDB) for drop-in replacement.
+    History is lost on server restart.
     """
+
+    def __init__(self):
+        from collections import defaultdict
+        self._turns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._summaries: Dict[str, Dict[str, Any]] = defaultdict(dict)
+        self._metadata: Dict[str, Dict[str, Any]] = {}
+
+    def append_turn(
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        meta: Optional[Dict[str, Any]] = None,
+        patient_id: Optional[str] = None,
+    ) -> SessionTurn:
+        """Add a conversation turn."""
+        turn_ts = _utc_iso()
+        turn = {
+            "session_id": session_id,
+            "turn_ts": turn_ts,
+            "role": role,
+            "text": text,
+            "meta": meta or {},
+            "patient_id": patient_id,
+        }
+        self._turns[session_id].append(turn)
+        return SessionTurn(
+            session_id=session_id, turn_ts=turn_ts, role=role,
+            text=text, meta=turn["meta"], patient_id=patient_id,
+        )
+
+    def get_recent(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get recent turns for a session (newest first)."""
+        lim = limit or 10
+        turns = self._turns.get(session_id, [])
+        return list(reversed(turns[-lim:]))
+
+    def get_summary(self, session_id: str) -> Dict[str, Any]:
+        """Get session summary."""
+        return self._summaries.get(session_id, {})
+
+    def update_summary(
+        self,
+        session_id: str,
+        summary: Dict[str, Any],
+        patient_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Update session summary."""
+        self._summaries[session_id].update(summary)
+        if user_id:
+            self._summaries[session_id]["user_id"] = user_id
+        if patient_id:
+            self._summaries[session_id]["patient_id"] = patient_id
+        self._summaries[session_id]["last_activity"] = _utc_iso()
+
+    def clear_session(self, session_id: str) -> None:
+        """Delete all turns and summary for a session."""
+        self._turns.pop(session_id, None)
+        self._summaries.pop(session_id, None)
+        self._metadata.pop(session_id, None)
+
+    def set_patient(self, session_id: str, patient_id: str) -> None:
+        self.update_summary(session_id=session_id, summary={}, patient_id=patient_id)
+
+    def get_patient(self, session_id: str) -> Optional[str]:
+        item = self.get_summary(session_id)
+        return item.get("patient_id")
+
+    def clear_all(self) -> None:
+        """Clear all session data (for testing)."""
+        self._turns.clear()
+        self._summaries.clear()
+        self._metadata.clear()
+
+
+# Global singleton session store instance
+_SESSION_STORE = None
+
+
+def _build_dynamodb_store() -> SessionStore:
+    """Factory that builds a DynamoDB SessionStore using environment variables."""
     region = os.getenv("AWS_REGION", "us-east-1")
     turns_table_raw = os.getenv("DDB_TURNS_TABLE", "hcai_session_turns")
     summary_table_raw = os.getenv("DDB_SUMMARY_TABLE", "hcai_session_summary")
@@ -576,17 +654,21 @@ def build_store_from_env() -> SessionStore:
     )
 
 
-def get_session_store() -> SessionStore:
+def get_session_store():
     """Get or create singleton session store instance.
 
-    This function returns a singleton SessionStore instance to avoid
-    creating multiple DynamoDB connections, which can cause connection
-    pool exhaustion and timeouts under concurrent load.
+    Uses SESSION_PROVIDER env var to select backend:
+    - "memory" (default): In-memory store, no external dependencies
+    - "dynamodb": DynamoDB-backed store
 
     Returns:
-        SessionStore: Singleton session store instance
+        Session store instance (InMemorySessionStore or SessionStore)
     """
     global _SESSION_STORE
     if _SESSION_STORE is None:
-        _SESSION_STORE = build_store_from_env()
+        provider = os.getenv("SESSION_PROVIDER", "memory").lower()
+        if provider == "dynamodb":
+            _SESSION_STORE = _build_dynamodb_store()
+        else:
+            _SESSION_STORE = InMemorySessionStore()
     return _SESSION_STORE

@@ -1,9 +1,10 @@
 """Session management module."""
 
 from .store import (
+    InMemorySessionStore,
     SessionStore,
-    get_session_store,
     SessionTurn,
+    get_session_store,
 )
 
-__all__ = ["SessionStore", "get_session_store", "SessionTurn"]
+__all__ = ["InMemorySessionStore", "SessionStore", "SessionTurn", "get_session_store"]

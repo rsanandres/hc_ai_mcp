@@ -35,7 +35,7 @@ if EMBEDDING_PROVIDER == "nomic":
 
 # Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
-BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v1")
+BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 BEDROCK_EMBED_BATCH_SIZE = int(os.getenv("BEDROCK_EMBED_BATCH_SIZE", "4"))
 
 
@@ -138,8 +138,14 @@ def _get_embeddings_bedrock(texts: List[str]) -> Optional[List[List[float]]]:
     """
     try:
         import boto3
-        
-        client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+        from botocore.config import Config as BotoConfig
+
+        boto_config = BotoConfig(
+            read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "60")),
+            connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "10")),
+            retries={"max_attempts": int(os.getenv("BEDROCK_MAX_RETRIES", "2"))},
+        )
+        client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION, config=boto_config)
         embeddings = []
         batch_size = max(1, BEDROCK_EMBED_BATCH_SIZE)
 
@@ -236,7 +242,14 @@ def test_connection() -> Dict[str, Any]:
         
         try:
             import boto3
-            client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+            from botocore.config import Config as BotoConfig
+
+            boto_config = BotoConfig(
+                read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "60")),
+                connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "10")),
+                retries={"max_attempts": int(os.getenv("BEDROCK_MAX_RETRIES", "2"))},
+            )
+            client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION, config=boto_config)
             # Try a simple embedding
             body = json.dumps({"inputText": "test"})
             response = client.invoke_model(

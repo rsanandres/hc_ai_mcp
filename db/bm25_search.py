@@ -17,6 +17,9 @@ from langchain_core.documents import Document
 SCHEMA_NAME = os.getenv("DB_SCHEMA_NAME", "public")
 TABLE_NAME = os.getenv("DB_TABLE_NAME", "hc_ai_chunks")
 
+# Allowed metadata keys for filtering (prevents SQL injection via arbitrary keys)
+ALLOWED_METADATA_KEYS = {"patient_id", "resource_type", "effective_date", "encounter_id", "status"}
+
 
 async def bm25_search(
     query: str,
@@ -78,7 +81,8 @@ async def bm25_search(
     where_clauses = []
     if filter_metadata:
         for key, value in filter_metadata.items():
-            # Database uses snake_case
+            if key not in ALLOWED_METADATA_KEYS:
+                continue
             param_name = f"meta_{key}"
             where_clauses.append(
                 f"langchain_metadata->>'{key}' = :{param_name}"
@@ -168,7 +172,8 @@ async def bm25_search_with_phrase(
     where_clauses = []
     if filter_metadata:
         for key, value in filter_metadata.items():
-            # Database uses snake_case
+            if key not in ALLOWED_METADATA_KEYS:
+                continue
             param_name = f"meta_{key}"
             where_clauses.append(
                 f"langchain_metadata->>'{key}' = :{param_name}"
