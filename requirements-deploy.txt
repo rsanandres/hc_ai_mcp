@@ -1,0 +1,8 @@
+# Minimal deps for MCP server startup (tool registration only)
+# Heavy deps (torch, langchain, etc.) are imported lazily inside tool functions
+mcp>=1.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
