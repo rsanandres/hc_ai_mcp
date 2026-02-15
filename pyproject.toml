@@ -3,8 +3,8 @@ requires = ["setuptools>=69.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hc-ai-mcp"
-version = "1.0.1"
+name = "atlas_mcp"
+version = "0.1.0"
 description = "AI-powered MCP server for FHIR document search and conversation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -54,12 +54,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rsanandres/hc_ai_mcp"
-Repository = "https://github.com/rsanandres/hc_ai_mcp"
-Issues = "https://github.com/rsanandres/hc_ai_mcp/issues"
+Homepage = "https://github.com/rsanandres/atlas_mcp"
+Repository = "https://github.com/rsanandres/atlas_mcp"
+Issues = "https://github.com/rsanandres/atlas_mcp/issues"
 
 [project.scripts]
-hc-ai-mcp = "server:main"
+atlas_mcp = "server:main"
 
 [tool.setuptools.packages.find]
 include = [
