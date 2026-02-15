@@ -9,12 +9,12 @@ HC_AI_DEBUG=true
 ```
 
 This enables DEBUG-level logs across:
-- `hc_ai.agent`
-- `hc_ai.tools`
-- `hc_ai.db`
-- `hc_ai.embeddings`
-- `hc_ai.reranker`
-- `hc_ai.session`
+- `atlas.agent`
+- `atlas.tools`
+- `atlas.db`
+- `atlas.embeddings`
+- `atlas.reranker`
+- `atlas.session`
 
 ## Health Checks
 
@@ -47,7 +47,7 @@ It validates:
 
 ## Performance Profiling
 
-Use `HC_AI_DEBUG=true` and inspect:
+Use `HC_AI_DEBUG=true` and inspect:  <!-- NOTE: env var name kept as HC_AI_DEBUG for backwards compatibility -->
 - Agent response timings
 - Reranker cache hit/miss behavior
 - Embedding latency and batch size impact

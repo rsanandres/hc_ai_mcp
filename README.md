@@ -1,4 +1,4 @@
-# hc-ai-mcp
+# atlas_mcp
 
 An MCP server that brings AI-powered search and conversation to your FHIR clinical documents.
 
@@ -9,7 +9,7 @@ An MCP server that brings AI-powered search and conversation to your FHIR clinic
 
 ## What It Does
 
-`hc-ai-mcp` is a developer-focused MCP server for working with FHIR data. It lets you embed FHIR resources, search them with semantic retrieval, and talk to an AI agent that can answer questions with citations from your clinical documents.
+`atlas_mcp` is a developer-focused MCP server for working with FHIR data. It lets you embed FHIR resources, search them with semantic retrieval, and talk to an AI agent that can answer questions with citations from your clinical documents.
 
 - AI agent that understands and queries FHIR documents
 - Semantic search with cross-encoder reranking for accuracy
@@ -28,8 +28,8 @@ An MCP server that brings AI-powered search and conversation to your FHIR clinic
 ### 1) Clone and Install
 
 ```bash
-git clone https://github.com/rsanandres/hc-ai-mcp.git
-cd hc-ai-mcp
+git clone https://github.com/rsanandres/atlas_mcp.git
+cd atlas_mcp
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -77,7 +77,7 @@ flowchart TB
         Custom[Custom Client]
     end
 
-    subgraph server [HcAiMcpServer]
+    subgraph server [AtlasMcpServer]
         MCP[MCP Protocol Layer]
         Tools[Tool Registry]
         Agent[LangGraph Agent]
@@ -179,9 +179,9 @@ RERANK_TIMEOUT=30
 ```json
 {
   "mcpServers": {
-    "hc-ai": {
+    "atlas": {
       "command": "python",
-      "args": ["/path/to/hc-ai-mcp/server.py"],
+      "args": ["/path/to/atlas_mcp/server.py"],
       "env": {}
     }
   }
@@ -192,9 +192,9 @@ RERANK_TIMEOUT=30
 
 ```json
 {
-  "hc-ai": {
+  "atlas": {
     "command": "python",
-    "args": ["/path/to/hc-ai-mcp/server.py"]
+    "args": ["/path/to/atlas_mcp/server.py"]
   }
 }
 ```

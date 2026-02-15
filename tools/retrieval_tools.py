@@ -10,7 +10,7 @@ from config import is_tool_enabled
 from logging_config import get_logger
 from tools.utils import error_response, get_timeout, validate_k, validate_metadata, validate_non_empty
 
-logger = get_logger("hc_ai.tools.retrieval")
+logger = get_logger("atlas.tools.retrieval")
 
 
 def register_retrieval_tools(mcp: Any, config: Dict[str, Any]) -> None:

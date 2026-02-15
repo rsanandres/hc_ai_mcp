@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Health check script for HC-AI MCP Server."""
+"""Health check script for Atlas MCP Server."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 from config import load_config, validate_env
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.health")
+logger = get_logger("atlas.health")
 
 
 async def _check_db() -> Dict[str, Any]:

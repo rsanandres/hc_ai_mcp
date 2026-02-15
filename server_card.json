@@ -1,12 +1,12 @@
 {
   "version": "1.0",
   "serverInfo": {
-    "name": "hc-ai-mcp",
-    "title": "HC-AI MCP Server",
-    "version": "1.0.1"
+    "name": "atlas_mcp",
+    "title": "Atlas MCP Server",
+    "version": "0.1.0"
   },
   "description": "AI-powered MCP server for searching and conversing over FHIR R4 clinical documents. Features hybrid retrieval (BM25 + pgvector), cross-encoder reranking, LangGraph multi-agent workflow, PII masking, and multi-provider LLM support.",
-  "documentationUrl": "https://github.com/rsanandres/hc_ai_mcp",
+  "documentationUrl": "https://github.com/rsanandres/atlas_mcp",
   "transport": {
     "type": "streamable-http",
     "endpoint": "/mcp/"
@@ -17,7 +17,7 @@
   "tools": [
     {
       "name": "agent_query",
-      "description": "Query the HC-AI agent with a natural language question. Uses a multi-agent workflow with query classification, hybrid search + reranking, validation, and response synthesis.",
+      "description": "Query the Atlas agent with a natural language question. Uses a multi-agent workflow with query classification, hybrid search + reranking, validation, and response synthesis.",
       "inputSchema": {
         "type": "object",
         "required": ["query", "session_id"],

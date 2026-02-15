@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HC-AI MCP Server - Main entry point.
+"""Atlas MCP Server - Main entry point.
 
 A Model Context Protocol (MCP) server that exposes healthcare AI tools
 for querying patient data, reranking documents, and managing embeddings.
@@ -36,13 +36,13 @@ from logging_config import get_logger
 load_dotenv(package_dir / ".env")
 
 
-logger = get_logger("hc_ai.server")
+logger = get_logger("atlas.server")
 
 
 def main() -> None:
     """Main entry point for the MCP server."""
     parser = argparse.ArgumentParser(
-        description="HC-AI MCP Server",
+        description="Atlas MCP Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

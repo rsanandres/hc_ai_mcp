@@ -1,4 +1,4 @@
-# Smithery.ai configuration for hc-ai-mcp
+# Smithery.ai configuration for atlas_mcp
 build:
   dockerBuildPath: ./
 

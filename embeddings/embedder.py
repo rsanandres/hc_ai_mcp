@@ -13,7 +13,7 @@ load_dotenv()
 
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.embeddings")
+logger = get_logger("atlas.embeddings")
 
 # Embedding provider configuration
 # Supported: "ollama" (default), "bedrock", "nomic" (fallback)

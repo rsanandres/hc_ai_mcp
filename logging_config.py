@@ -1,4 +1,4 @@
-"""Logging configuration for the HC-AI MCP server."""
+"""Logging configuration for the Atlas MCP server."""
 
 from __future__ import annotations
 

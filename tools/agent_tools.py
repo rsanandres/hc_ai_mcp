@@ -1,4 +1,4 @@
-"""MCP tools for the HC-AI agent."""
+"""MCP tools for the Atlas agent."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from config import is_tool_enabled
 from logging_config import get_logger
 from tools.utils import error_response, get_timeout, validate_k, validate_non_empty
 
-logger = get_logger("hc_ai.tools.agent")
+logger = get_logger("atlas.tools.agent")
 
 
 def register_agent_tools(mcp: Any, config: Dict[str, Any]) -> None:

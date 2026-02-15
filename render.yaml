@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hc-ai-mcp
+    name: atlas_mcp
     runtime: docker
     plan: free
     envVars:

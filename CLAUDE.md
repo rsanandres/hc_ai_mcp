@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-hc-ai-mcp is a standalone Python toolkit for AI-powered search and conversation over FHIR R4 clinical documents, accessible via MCP (Model Context Protocol). It provides 15+ MCP tools for agent queries, document retrieval, session management, and embeddings ingestion. The MCP interface is the delivery mechanism — the value is the full healthcare AI stack underneath (hybrid search, cross-encoder reranking, multi-agent workflow, PII masking, medical API integrations).
+atlas_mcp is a standalone Python toolkit for AI-powered search and conversation over FHIR R4 clinical documents, accessible via MCP (Model Context Protocol). It provides 15+ MCP tools for agent queries, document retrieval, session management, and embeddings ingestion. The MCP interface is the delivery mechanism — the value is the full healthcare AI stack underneath (hybrid search, cross-encoder reranking, multi-agent workflow, PII masking, medical API integrations).
 
 Requires Python 3.11+, PostgreSQL 14+ with pgvector, and an LLM provider (Ollama default). Designed to be cloned, configured via `.env`, and run immediately.
 
@@ -70,7 +70,7 @@ The server entry point is `server.py`, which creates a FastMCP instance, registe
 
 - `config.yaml` — Tool enable/disable toggles and server transport settings.
 - `.env` — Credentials and runtime config. `DB_PASSWORD` is the only required variable. See `env.example` for all 67 env vars.
-- `HC_AI_DEBUG=true` enables debug-level logging.
+- `HC_AI_DEBUG=true` enables debug-level logging.  <!-- NOTE: env var name kept as HC_AI_DEBUG for backwards compatibility -->
 
 ## Testing
 

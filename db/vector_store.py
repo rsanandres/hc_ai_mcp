@@ -17,7 +17,7 @@ from langchain_core.documents import Document
 # Load environment from package directory
 load_dotenv()
 
-logger = get_logger("hc_ai.db")
+logger = get_logger("atlas.db")
 
 # Database configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")

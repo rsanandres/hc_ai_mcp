@@ -16,7 +16,7 @@ This report documents the primary issues found in the MCP server and the fixes a
 - **Missing LLM providers**: Added OpenAI and Anthropic support with explicit env validation.
 - **Inconsistent error responses**: Standardized error shapes across tools.
 - **Timeout handling**: Added configurable timeouts for agent and rerank operations.
-- **Logging gaps**: Centralized logging with `HC_AI_DEBUG` flag and module namespaces.
+- **Logging gaps**: Centralized logging with `HC_AI_DEBUG` flag and module namespaces.  <!-- NOTE: env var name kept as HC_AI_DEBUG for backwards compatibility -->
 - **Session leaks**: Added TTL cleanup and session caps for in-memory storage.
 - **Thread safety**: Guarded queue stats updates with locks.
 

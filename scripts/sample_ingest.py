@@ -29,7 +29,7 @@ from logging_config import get_logger
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logger = get_logger("hc_ai.ingest")
+logger = get_logger("atlas.ingest")
 
 
 async def ingest_fhir_bundle(bundle_path: Path, patient_id: str | None = None) -> dict:

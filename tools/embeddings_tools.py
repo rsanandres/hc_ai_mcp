@@ -8,7 +8,7 @@ from config import is_tool_enabled
 from logging_config import get_logger
 from tools.utils import error_response, validate_non_empty
 
-logger = get_logger("hc_ai.tools.embeddings")
+logger = get_logger("atlas.tools.embeddings")
 
 
 def register_embeddings_tools(mcp: Any, config: Dict[str, Any]) -> None:

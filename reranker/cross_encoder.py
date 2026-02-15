@@ -15,7 +15,7 @@ RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", "auto")
 from logging_config import get_logger
 from reranker.cache import build_cache_key, get_cache
 
-logger = get_logger("hc_ai.reranker")
+logger = get_logger("atlas.reranker")
 
 
 def _resolve_device(device: str) -> str:

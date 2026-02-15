@@ -12,7 +12,7 @@ from agent.tools.schemas import ChunkResult, RetrievalResponse
 from agent.tools.context import get_patient_context
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.retrieval")
+logger = get_logger("atlas.retrieval")
 
 
 def strip_patient_name_from_query(query: str, patient_id: Optional[str] = None) -> str:

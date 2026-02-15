@@ -52,7 +52,7 @@ from agent.query_classifier import QueryClassifier, QueryType
 
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.agent")
+logger = get_logger("atlas.agent")
 
 
 class AgentState(TypedDict, total=False):

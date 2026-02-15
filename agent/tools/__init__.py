@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.tools")
+logger = get_logger("atlas.tools")
 
 from agent.pii_masker.factory import create_pii_masker
 from session.store import get_session_store

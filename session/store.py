@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.session")
+logger = get_logger("atlas.session")
 
 load_dotenv()
 

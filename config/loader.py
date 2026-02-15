@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from logging_config import get_logger
 
-logger = get_logger("hc_ai.config")
+logger = get_logger("atlas.config")
 
 
 _CONFIG_CACHE: Dict[str, Any] | None = None
